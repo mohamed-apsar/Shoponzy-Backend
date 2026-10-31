@@ -9,8 +9,8 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(5000),
   MONGODB_URI: isTest ? z.string().optional() : z.string().min(1, "MONGODB_URI is required"),
 
-  CLIENT_URL: z.string().url().default("http://localhost:5173"),
-  ADMIN_URL: z.string().url().default("http://127.0.0.1:5176"),
+  CLIENT_URL: z.string().url().default(process.env.NODE_ENV === "production" ? "https://shoponzy-user-site.vercel.app" : "http://localhost:5173"),
+  ADMIN_URL: z.string().url().default(process.env.NODE_ENV === "production" ? "https://shoponzy-admin.vercel.app" : "http://127.0.0.1:5176"),
   // Extra comma-separated origins allowed by CORS (e.g. a staging domain).
   CORS_EXTRA_ORIGINS: z.string().default(""),
 
@@ -20,7 +20,7 @@ const schema = z.object({
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(isTest ? 4 : 12),
 
   COOKIE_SECURE: bool(process.env.NODE_ENV === "production"),
-  COOKIE_SAMESITE: z.enum(["lax", "strict", "none"]).default("lax"),
+  COOKIE_SAMESITE: z.enum(["lax", "strict", "none"]).default(process.env.NODE_ENV === "production" ? "none" : "lax"),
   COOKIE_DOMAIN: z.string().optional(),
   // Number of reverse proxies in front of the API (for correct client IPs in rate limiting).
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
@@ -70,5 +70,12 @@ export const isProd = env.NODE_ENV === "production";
 export const cloudinaryConfigured = Boolean(env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET);
 export const razorpayConfigured = Boolean(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET);
 export const smtpConfigured = Boolean(env.SMTP_HOST);
-export const allowedOrigins = [env.CLIENT_URL, env.ADMIN_URL, ...env.CORS_EXTRA_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)]
+export const allowedOrigins = [
+  env.CLIENT_URL,
+  env.ADMIN_URL,
+  "https://shoponzy-user-site.vercel.app",
+  "https://shoponzy-admin.vercel.app",
+  ...env.CORS_EXTRA_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean),
+]
+  .filter((origin, index, origins) => origins.indexOf(origin) === index)
   .map((u) => new URL(u).origin);

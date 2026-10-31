@@ -27,7 +27,12 @@ describe("CSRF and origin checks", () => {
 
   it("accepts the storefront and admin origins", async () => {
     const user = await createUser();
-    for (const origin of ["http://localhost:5173", "http://127.0.0.1:5176"]) {
+    for (const origin of [
+      "http://localhost:5173",
+      "http://127.0.0.1:5176",
+      "https://shoponzy-user-site.vercel.app",
+      "https://shoponzy-admin.vercel.app",
+    ]) {
       const b = await browser();
       await b.agent.post(`${API}/auth/login`).set("Origin", origin).set("X-CSRF-Token", b.token).send({ email: user.email, password: PASSWORD }).expect(200);
     }

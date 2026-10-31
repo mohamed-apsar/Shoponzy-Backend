@@ -31,7 +31,7 @@ Configure these production environment variables in the Vercel project before de
 - `COOKIE_SECURE=true`
 - `NODE_ENV=production`
 
-Add any additional browser origins to `CORS_EXTRA_ORIGINS`. Never commit `.env`; Vercel does not use the local environment file. Check the function logs for startup/configuration errors if deployment still fails. `GET /api/v1/health` should return `db: "connected"` when the database is available.
+The production storefront and admin origins are allowed by default. Cross-site session cookies default to `SameSite=None` in production and require `COOKIE_SECURE=true`; if explicitly setting `COOKIE_SAMESITE`, use `none`. Add any additional browser origins to `CORS_EXTRA_ORIGINS`. Never commit `.env`; Vercel does not use the local environment file. Check the function logs for startup/configuration errors if deployment still fails. `GET /api/v1/health` should return `db: "connected"` when the database is available.
 
 ### Optional services and what happens without them
 
