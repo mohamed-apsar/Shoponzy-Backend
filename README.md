@@ -19,6 +19,20 @@ npm test                      # in-memory MongoDB; no .env needed
 - **The seed's stock is sample data** (20 per variant): the original site had none. Set real stock in the admin panel before launch.
 - Chelsea boots were listed as "₹480–₹520"; the seed prices sizes 6–8 at ₹480 and 9–10 at ₹520. Confirm.
 
+### Deploying to Vercel
+
+Set the Vercel project's **Root Directory** to `backend`. The included `vercel.json` routes requests to an Express serverless handler, which connects to MongoDB on demand; the local `npm start` server and its background jobs remain unchanged.
+
+Configure these production environment variables in the Vercel project before deploying:
+
+- `MONGODB_URI`
+- `JWT_SECRET` (at least 32 characters)
+- `CLIENT_URL` and `ADMIN_URL` (the deployed storefront and admin origins)
+- `COOKIE_SECURE=true`
+- `NODE_ENV=production`
+
+Add any additional browser origins to `CORS_EXTRA_ORIGINS`. Never commit `.env`; Vercel does not use the local environment file. Check the function logs for startup/configuration errors if deployment still fails. `GET /api/v1/health` should return `db: "connected"` when the database is available.
+
 ### Optional services and what happens without them
 
 | Service | Env | Without it |
