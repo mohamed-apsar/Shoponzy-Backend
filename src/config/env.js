@@ -3,9 +3,12 @@ import { z } from "zod";
 
 const bool = (fallback) => z.enum(["true", "false"]).default(String(fallback)).transform((v) => v === "true");
 const isTest = process.env.NODE_ENV === "test";
+const isVercel = process.env.VERCEL === "1";
+const secureCookies = process.env.NODE_ENV === "production" || isVercel;
 
 const schema = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  NODE_ENV: z.enum(["development", "test", "production"]).default(isVercel ? "production" : "development")
+    .transform((v) => isVercel ? "production" : v),
   PORT: z.coerce.number().int().positive().default(5000),
   MONGODB_URI: isTest ? z.string().optional() : z.string().min(1, "MONGODB_URI is required"),
 
@@ -19,8 +22,9 @@ const schema = z.object({
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(isTest ? 4 : 12),
 
-  COOKIE_SECURE: bool(process.env.NODE_ENV === "production"),
-  COOKIE_SAMESITE: z.enum(["lax", "strict", "none"]).default(process.env.NODE_ENV === "production" ? "none" : "lax"),
+  COOKIE_SECURE: z.enum(["true", "false"]).default(String(secureCookies)).transform((v) => isVercel || v === "true"),
+  COOKIE_SAMESITE: z.enum(["lax", "strict", "none"]).default(secureCookies ? "none" : "lax")
+    .transform((v) => isVercel ? "none" : v),
   COOKIE_DOMAIN: z.string().optional(),
   // Number of reverse proxies in front of the API (for correct client IPs in rate limiting).
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
