@@ -43,6 +43,14 @@ describe("CSRF and origin checks", () => {
 });
 
 describe("CORS and headers", () => {
+  it("returns API information from the root URL", async () => {
+    const res = await request(app).get("/").expect(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      data: { name: "Shoponzy API", status: "ok", health: `${API}/health`, api: API },
+    });
+  });
+
   it("allows credentials only for known origins", async () => {
     const ok = await request(app).options(`${API}/auth/login`).set("Origin", "http://localhost:5173").set("Access-Control-Request-Method", "POST");
     expect(ok.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
