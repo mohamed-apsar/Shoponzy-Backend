@@ -102,6 +102,8 @@ export async function isReferenced(publicId) {
       { "images.publicId": publicId },
       { "colors.featuredImage.publicId": publicId },
       { "colors.images.publicId": publicId },
+      { "contentBlocks.image.publicId": publicId },
+      { "contentBlocks.images.publicId": publicId },
     ] }),
     Banner.exists({ $or: [{ "image.publicId": publicId }, { "mobileImage.publicId": publicId }] }),
     Popup.exists({ "image.publicId": publicId }),

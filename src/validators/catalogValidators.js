@@ -50,6 +50,10 @@ const productColor = z.object({
   featuredImage: imageRef.optional(),
   images: z.array(imageRef.unwrap()).max(12).optional(),
 }).strict();
+const productContentBlock = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("banner"), image: imageRef.unwrap() }).strict(),
+  z.object({ type: z.literal("imageRow"), images: z.array(imageRef.unwrap()).length(3) }).strict(),
+]);
 
 const productBase = {
   name: z.string().trim().min(2).max(160),
@@ -61,6 +65,7 @@ const productBase = {
   category: objectId,
   images: z.array(imageRef.unwrap()).max(12).optional(),
   colors: z.array(productColor).max(20).optional(),
+  contentBlocks: z.array(productContentBlock).max(30).optional(),
   sizes: z.array(z.string().trim().min(1).max(20)).max(30).optional(),
   variants: z.array(variant).min(1).max(200).optional(),
   // Simple products (single variant): price/mrp/stock instead of `variants`.

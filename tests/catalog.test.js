@@ -150,6 +150,54 @@ describe("admin products", () => {
     expect(destroyed).toEqual([featured.publicId, gallery.publicId]);
   });
 
+  it("stores ordered product banners and image rows, exposes them on detail, and releases replaced images", async () => {
+    const { destroyed } = mockCloudinary();
+    const jpeg = Buffer.concat([Buffer.from("ffd8ffe000104a4649460001", "hex"), Buffer.alloc(100)]);
+    const upload = async (name) => (await admin.agent.post(`${API}/admin/uploads`)
+      .set("X-CSRF-Token", admin.token).field("kind", "product").attach("file", jpeg, name).expect(201)).body.data;
+    const banner = await upload("detail-banner.jpg");
+    const rowImages = await Promise.all(["office.jpg", "date.jpg", "party.jpg"].map(upload));
+    const replacement = await upload("updated-banner.jpg");
+    const cat = await category("Shoes");
+    const created = await admin.post("/admin/products", {
+      name: "Product Story", category: String(cat._id), price: 100,
+      contentBlocks: [
+        { type: "banner", image: banner },
+        { type: "imageRow", images: rowImages },
+      ],
+    }).expect(201);
+    expect(created.body.data.contentBlocks).toMatchObject([
+      { type: "banner", image: { publicId: banner.publicId } },
+      { type: "imageRow", images: rowImages.map((image) => expect.objectContaining({ publicId: image.publicId })) },
+    ]);
+
+    const detail = await request(app).get(`${API}/products/${created.body.data.slug}`).expect(200);
+    expect(detail.body.data.contentBlocks).toMatchObject([
+      { type: "banner", image: { url: banner.url } },
+      { type: "imageRow", images: rowImages.map((image) => expect.objectContaining({ url: image.url })) },
+    ]);
+    expect((await request(app).get(`${API}/products`).expect(200)).body.data[0]).not.toHaveProperty("contentBlocks");
+
+    await admin.patch(`/admin/products/${created.body.data.id}`, {
+      contentBlocks: [
+        { type: "banner", image: replacement },
+        { type: "imageRow", images: rowImages },
+      ],
+    }).expect(200);
+    expect(destroyed).toEqual([banner.publicId]);
+
+    await admin.del(`/admin/products/${created.body.data.id}`).expect(200);
+    expect(destroyed).toEqual([banner.publicId, replacement.publicId, ...rowImages.map((image) => image.publicId)]);
+  });
+
+  it("requires exactly three uploaded images for each product image row", async () => {
+    const cat = await category("Shoes");
+    await admin.post("/admin/products", {
+      name: "Incomplete Story", category: String(cat._id), price: 100,
+      contentBlocks: [{ type: "imageRow", images: [] }],
+    }).expect(400);
+  });
+
   it("archives (not deletes) products that appear in orders", async () => {
     const used = await simpleProduct({ name: "Used" }), unused = await simpleProduct({ name: "Unused" });
     await Order.create({ orderNumber: "SZ100001", contact: { name: "A", phone: "9876543210" }, items: [{ product: used._id, qty: 1 }], total: 1, paymentMethod: "cod", status: "placed" });

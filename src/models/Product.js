@@ -24,6 +24,12 @@ const colorSchema = new mongoose.Schema({
   images: { type: [imageSchema], default: [] },
 }, { _id: false });
 
+const productContentBlockSchema = new mongoose.Schema({
+  type: { type: String, enum: ["banner", "imageRow"], required: true },
+  image: { type: imageSchema, default: null },
+  images: { type: [imageSchema], default: [] },
+}, { _id: false });
+
 const productSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 160 },
   slug: { type: String, required: true, unique: true, lowercase: true, trim: true, maxlength: 180, match: /^[a-z0-9]+(?:-[a-z0-9]+)*$/ },
@@ -37,6 +43,7 @@ const productSchema = new mongoose.Schema({
   categoryPath: [{ type: mongoose.Schema.Types.ObjectId, ref: "Category" }],
   images: { type: [imageSchema], default: [] }, // Shared gallery; colour galleries take precedence when present.
   colors: { type: [colorSchema], default: [] },
+  contentBlocks: { type: [productContentBlockSchema], default: [] },
   sizes: [{ type: String, trim: true, maxlength: 20 }],
   variants: { type: [variantSchema], validate: [(v) => v.length > 0, "A product needs at least one variant."] },
   specs: [{ label: { type: String, maxlength: 60 }, value: { type: String, maxlength: 200 }, _id: false }],

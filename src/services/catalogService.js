@@ -100,7 +100,7 @@ async function computeFacets(base, subs) {
 export async function getProductBySlug(slug) {
   const p = await Product.findOne({ slug, ...(await visibleFilter()) }).populate("category", "name slug path").lean();
   if (!p) throw AppError.notFound("Product not found.");
-  return publicProduct(p);
+  return publicProduct(p, { includeContentBlocks: true });
 }
 
 export async function relatedProducts(productId, limit = 10) {
