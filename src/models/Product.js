@@ -17,6 +17,13 @@ const variantSchema = new mongoose.Schema({
 });
 toJSONPlugin(variantSchema);
 
+const colorSchema = new mongoose.Schema({
+  name: { type: String, required: true, trim: true, maxlength: 40 },
+  hex: { type: String, match: /^#[0-9a-fA-F]{6}$/, required: true },
+  featuredImage: { type: imageSchema, default: null },
+  images: { type: [imageSchema], default: [] },
+}, { _id: false });
+
 const productSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 160 },
   slug: { type: String, required: true, unique: true, lowercase: true, trim: true, maxlength: 180, match: /^[a-z0-9]+(?:-[a-z0-9]+)*$/ },
@@ -28,8 +35,8 @@ const productSchema = new mongoose.Schema({
   category: { type: mongoose.Schema.Types.ObjectId, ref: "Category", required: true },
   // category + all its ancestors, so a product shows under every level of its branch.
   categoryPath: [{ type: mongoose.Schema.Types.ObjectId, ref: "Category" }],
-  images: { type: [imageSchema], default: [] }, // images[0] is the primary image
-  colors: [{ name: { type: String, required: true, trim: true, maxlength: 40 }, hex: { type: String, match: /^#[0-9a-fA-F]{6}$/, required: true }, _id: false }],
+  images: { type: [imageSchema], default: [] }, // Shared gallery; colour galleries take precedence when present.
+  colors: { type: [colorSchema], default: [] },
   sizes: [{ type: String, trim: true, maxlength: 20 }],
   variants: { type: [variantSchema], validate: [(v) => v.length > 0, "A product needs at least one variant."] },
   specs: [{ label: { type: String, maxlength: 60 }, value: { type: String, maxlength: 200 }, _id: false }],

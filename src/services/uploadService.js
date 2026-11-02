@@ -98,7 +98,11 @@ export const resolveImagesKeeping = (refs = [], existing = []) => Promise.all(re
 export async function isReferenced(publicId) {
   const checks = await Promise.all([
     Category.exists({ "image.publicId": publicId }),
-    Product.exists({ "images.publicId": publicId }),
+    Product.exists({ $or: [
+      { "images.publicId": publicId },
+      { "colors.featuredImage.publicId": publicId },
+      { "colors.images.publicId": publicId },
+    ] }),
     Banner.exists({ $or: [{ "image.publicId": publicId }, { "mobileImage.publicId": publicId }] }),
     Popup.exists({ "image.publicId": publicId }),
     // Settings are a handful of free-form documents (one per Manage Site section); scan them.

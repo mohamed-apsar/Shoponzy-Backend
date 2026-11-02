@@ -117,6 +117,39 @@ describe("admin products", () => {
     await admin.post("/admin/products", { name: "Y", category: String(cat._id), price: 1, images: [{ url: "https://evil.example/x.jpg" }] }).expect(400);
   });
 
+  it("stores and releases featured and gallery images for each product colour", async () => {
+    const { destroyed } = mockCloudinary();
+    const jpeg = Buffer.concat([Buffer.from("ffd8ffe000104a4649460001", "hex"), Buffer.alloc(100)]);
+    const upload = async (name) => (await admin.agent.post(`${API}/admin/uploads`)
+      .set("X-CSRF-Token", admin.token).field("kind", "product").attach("file", jpeg, name).expect(201)).body.data;
+    const featured = await upload("black-feature.jpg");
+    const gallery = await upload("black-gallery.jpg");
+    const cat = await category("Shoes");
+    const created = await admin.post("/admin/products", {
+      name: "Image Variants", category: String(cat._id), sizes: ["7"],
+      colors: [{ name: "Black", hex: "#111111", featuredImage: featured, images: [gallery] }],
+      variants: [{ color: "Black", size: "7", price: 100, stock: 2 }],
+    }).expect(201);
+    expect(created.body.data.colors[0]).toMatchObject({
+      name: "Black",
+      featuredImage: { publicId: featured.publicId },
+      images: [expect.objectContaining({ publicId: gallery.publicId })],
+    });
+    const storefront = await request(app).get(`${API}/products/${created.body.data.slug}`).expect(200);
+    expect(storefront.body.data.colors[0]).toMatchObject({
+      featuredImage: { url: featured.url },
+      images: [expect.objectContaining({ url: gallery.url })],
+    });
+
+    await admin.patch(`/admin/products/${created.body.data.id}`, {
+      colors: [{ name: "Black", hex: "#111111", featuredImage: gallery, images: [] }],
+    }).expect(200);
+    expect(destroyed).toEqual([featured.publicId]);
+
+    await admin.del(`/admin/products/${created.body.data.id}`).expect(200);
+    expect(destroyed).toEqual([featured.publicId, gallery.publicId]);
+  });
+
   it("archives (not deletes) products that appear in orders", async () => {
     const used = await simpleProduct({ name: "Used" }), unused = await simpleProduct({ name: "Unused" });
     await Order.create({ orderNumber: "SZ100001", contact: { name: "A", phone: "9876543210" }, items: [{ product: used._id, qty: 1 }], total: 1, paymentMethod: "cod", status: "placed" });
