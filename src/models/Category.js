@@ -16,6 +16,7 @@ const categorySchema = new mongoose.Schema({
   description: { type: String, maxlength: 2000, default: "" },
   image: { type: imageSchema, default: null },
   exploreImage: { type: imageSchema, default: null },
+  bannerImage: { type: imageSchema, default: null },
   order: { type: Number, default: 0 },
   status: { type: String, enum: ["enabled", "disabled"], default: "enabled", index: true },
   seo: { type: seoSchema, default: () => ({}) },

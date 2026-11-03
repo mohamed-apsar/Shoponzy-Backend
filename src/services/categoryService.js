@@ -31,6 +31,7 @@ export async function createCategory(data) {
     ...place,
     image: await resolveImage(data.image),
     exploreImage: await resolveImage(data.exploreImage),
+    bannerImage: await resolveImage(data.bannerImage),
   });
 }
 
@@ -54,6 +55,7 @@ export async function updateCategory(id, data) {
   if (!cat) throw AppError.notFound("Category not found.");
   const oldImage = cat.image;
   const oldExploreImage = cat.exploreImage;
+  const oldBannerImage = cat.bannerImage;
 
   const parentChanged = data.parent !== undefined && String(data.parent || "") !== String(cat.parent || "");
   const slugChanged = data.slug !== undefined && data.slug !== cat.slug;
@@ -72,14 +74,16 @@ export async function updateCategory(id, data) {
     Object.assign(cat, place, { slug });
   }
 
-  const { parent: _p, slug: _s, image, exploreImage, ...rest } = data;
+  const { parent: _p, slug: _s, image, exploreImage, bannerImage, ...rest } = data;
   Object.assign(cat, rest);
   if (image !== undefined) cat.image = await resolveImageKeeping(image, cat.image?.toObject?.() ?? cat.image);
   if (exploreImage !== undefined) cat.exploreImage = await resolveImageKeeping(exploreImage, cat.exploreImage?.toObject?.() ?? cat.exploreImage);
+  if (bannerImage !== undefined) cat.bannerImage = await resolveImageKeeping(bannerImage, cat.bannerImage?.toObject?.() ?? cat.bannerImage);
   await cat.save();
   if (parentChanged || slugChanged) await rebuildBranch(cat);
   if (image !== undefined && oldImage?.publicId !== cat.image?.publicId) await releaseImages(imageIds(oldImage));
   if (exploreImage !== undefined && oldExploreImage?.publicId !== cat.exploreImage?.publicId) await releaseImages(imageIds(oldExploreImage));
+  if (bannerImage !== undefined && oldBannerImage?.publicId !== cat.bannerImage?.publicId) await releaseImages(imageIds(oldBannerImage));
   return cat;
 }
 
@@ -92,7 +96,7 @@ export async function deleteCategory(id) {
   if (products) throw AppError.conflict(`${products} product${products === 1 ? " is" : "s are"} still in this category. Move or archive them first.`);
   await Product.updateMany({ categoryPath: cat._id }, { $pull: { categoryPath: cat._id } });
   await cat.deleteOne();
-  await releaseImages(imageIds(cat.image, cat.exploreImage));
+  await releaseImages(imageIds(cat.image, cat.exploreImage, cat.bannerImage));
 }
 
 /* Ids of disabled categories and everything below them: their products are hidden from the storefront. */
@@ -116,5 +120,5 @@ export async function publicTree() {
 
 export const publicCategory = (c) => ({
   id: String(c._id), name: c.name, slug: c.slug, path: c.path, level: c.level, parent: c.parent ? String(c.parent) : null,
-  description: c.description, image: c.image, exploreImage: c.exploreImage, order: c.order, seo: c.seo, display: c.display,
+  description: c.description, image: c.image, exploreImage: c.exploreImage, bannerImage: c.bannerImage, order: c.order, seo: c.seo, display: c.display,
 });

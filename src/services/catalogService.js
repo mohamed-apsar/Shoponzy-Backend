@@ -71,7 +71,7 @@ export async function listProducts(q) {
     items: items.map(publicProduct),
     meta: { page: q.page, limit: q.limit, total, pages: Math.ceil(total / q.limit) },
     ...(facets ? { facets } : {}),
-    ...(category ? { category: { id: String(category._id), name: category.name, slug: category.slug, path: category.path, description: category.description, image: category.image, seo: category.seo, display: category.display } } : {}),
+    ...(category ? { category: { id: String(category._id), name: category.name, slug: category.slug, path: category.path, description: category.description, image: category.image, bannerImage: category.bannerImage, seo: category.seo, display: category.display } } : {}),
   };
 }
 

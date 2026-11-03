@@ -17,6 +17,7 @@ const categoryBase = {
   description: z.string().trim().max(2000).optional(),
   image: imageRef.optional(),
   exploreImage: imageRef.optional(),
+  bannerImage: imageRef.optional(),
   order: z.coerce.number().int().min(0).max(10_000).optional(),
   status: z.enum(["enabled", "disabled"]).optional(),
   seo: seo.optional(),

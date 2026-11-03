@@ -304,12 +304,13 @@ describe("uploads (Cloudinary mocked)", () => {
 
   it("stores, serves, replaces, and deletes a category Shop all background image", async () => {
     const { destroyed } = mockCloudinary();
-    const upload = async (name, buffer = JPEG) => (await admin.agent.post(`${API}/admin/uploads`)
+    const upload = (file, name) => admin.agent.post(`${API}/admin/uploads`)
       .set("X-CSRF-Token", admin.token)
       .field("kind", "category")
-      .attach("file", buffer, name)
-      .expect(201)).body.data;
-    const first = await upload("explore.jpg");
+      .attach("file", file, name)
+      .expect(201)
+      .then((response) => response.body.data);
+    const first = await upload(JPEG, "explore.jpg");
     const category = (await admin.post("/admin/categories", {
       name: "Explore bags",
       slug: "explore-bags",
@@ -320,12 +321,52 @@ describe("uploads (Cloudinary mocked)", () => {
     const publicTree = (await request(app).get(`${API}/categories`).expect(200)).body.data;
     expect(publicTree.find((item) => item.slug === category.slug).exploreImage.url).toBe(first.url);
 
-    const replacement = await upload("explore-replacement.png", PNG);
+    const replacement = await upload(PNG, "explore-replacement.png");
     await admin.patch(`/admin/categories/${category.id}`, { exploreImage: replacement }).expect(200);
     expect(destroyed).toEqual([first.publicId]);
 
     await admin.del(`/admin/categories/${category.id}`).expect(200);
     expect(destroyed).toEqual([first.publicId, replacement.publicId]);
+  });
+
+  it("serves and deletes category page banners and subcategory circle images", async () => {
+    const { destroyed } = mockCloudinary();
+    const upload = async (file, name) => (await admin.agent.post(`${API}/admin/uploads`)
+      .set("X-CSRF-Token", admin.token)
+      .field("kind", "category")
+      .attach("file", file, name)
+      .expect(201)).body.data;
+    const banner = await upload(JPEG, "category-banner.jpg");
+    const allCircle = await upload(PNG, "all-circle.png");
+    const subCircle = await upload(JPEG, "subcategory-circle.jpg");
+    const parent = (await admin.post("/admin/categories", {
+      name: "Perfumes",
+      slug: "perfumes",
+    }).expect(201)).body.data;
+    const child = (await admin.post("/admin/categories", {
+      name: "Eau de Parfum",
+      slug: "eau-de-parfum",
+      parent: parent.id,
+    }).expect(201)).body.data;
+
+    await admin.patch(`/admin/categories/${parent.id}`, {
+      bannerImage: banner,
+      image: allCircle,
+    }).expect(200);
+    await admin.patch(`/admin/categories/${child.id}`, { image: subCircle }).expect(200);
+
+    const publicTree = (await request(app).get(`${API}/categories`).expect(200)).body.data;
+    const publicParent = publicTree.find((item) => item.slug === "perfumes");
+    expect(publicParent.bannerImage.url).toBe(banner.url);
+    expect(publicParent.image.url).toBe(allCircle.url);
+    expect(publicParent.children[0].image.url).toBe(subCircle.url);
+    const listing = await request(app).get(`${API}/products?category=perfumes&limit=1`).expect(200);
+    expect(listing.body.category.bannerImage.url).toBe(banner.url);
+
+    await admin.del(`/admin/categories/${child.id}`).expect(200);
+    await admin.del(`/admin/categories/${parent.id}`).expect(200);
+    expect(destroyed).toHaveLength(3);
+    expect(destroyed).toEqual(expect.arrayContaining([banner.publicId, allCircle.publicId, subCircle.publicId]));
   });
 
   it("keeps an image that another record still uses", async () => {
