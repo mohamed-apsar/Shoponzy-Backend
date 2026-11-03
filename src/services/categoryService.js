@@ -26,7 +26,12 @@ export async function createCategory(data) {
   const place = placement(parent, data.slug);
   if (place.level > MAX_CATEGORY_LEVEL) throw AppError.badRequest(`Categories can be nested at most ${MAX_CATEGORY_LEVEL} levels deep.`);
   await assertUniqueSlug(place.parent, data.slug);
-  return Category.create({ ...data, ...place, image: await resolveImage(data.image) });
+  return Category.create({
+    ...data,
+    ...place,
+    image: await resolveImage(data.image),
+    exploreImage: await resolveImage(data.exploreImage),
+  });
 }
 
 /* Re-derives ancestors/level/path for every descendant, and categoryPath for affected products. */
@@ -48,6 +53,7 @@ export async function updateCategory(id, data) {
   const cat = await Category.findById(id);
   if (!cat) throw AppError.notFound("Category not found.");
   const oldImage = cat.image;
+  const oldExploreImage = cat.exploreImage;
 
   const parentChanged = data.parent !== undefined && String(data.parent || "") !== String(cat.parent || "");
   const slugChanged = data.slug !== undefined && data.slug !== cat.slug;
@@ -66,12 +72,14 @@ export async function updateCategory(id, data) {
     Object.assign(cat, place, { slug });
   }
 
-  const { parent: _p, slug: _s, image, ...rest } = data;
+  const { parent: _p, slug: _s, image, exploreImage, ...rest } = data;
   Object.assign(cat, rest);
   if (image !== undefined) cat.image = await resolveImageKeeping(image, cat.image?.toObject?.() ?? cat.image);
+  if (exploreImage !== undefined) cat.exploreImage = await resolveImageKeeping(exploreImage, cat.exploreImage?.toObject?.() ?? cat.exploreImage);
   await cat.save();
   if (parentChanged || slugChanged) await rebuildBranch(cat);
   if (image !== undefined && oldImage?.publicId !== cat.image?.publicId) await releaseImages(imageIds(oldImage));
+  if (exploreImage !== undefined && oldExploreImage?.publicId !== cat.exploreImage?.publicId) await releaseImages(imageIds(oldExploreImage));
   return cat;
 }
 
@@ -84,7 +92,7 @@ export async function deleteCategory(id) {
   if (products) throw AppError.conflict(`${products} product${products === 1 ? " is" : "s are"} still in this category. Move or archive them first.`);
   await Product.updateMany({ categoryPath: cat._id }, { $pull: { categoryPath: cat._id } });
   await cat.deleteOne();
-  await releaseImages(imageIds(cat.image));
+  await releaseImages(imageIds(cat.image, cat.exploreImage));
 }
 
 /* Ids of disabled categories and everything below them: their products are hidden from the storefront. */
@@ -108,5 +116,5 @@ export async function publicTree() {
 
 export const publicCategory = (c) => ({
   id: String(c._id), name: c.name, slug: c.slug, path: c.path, level: c.level, parent: c.parent ? String(c.parent) : null,
-  description: c.description, image: c.image, order: c.order, seo: c.seo, display: c.display,
+  description: c.description, image: c.image, exploreImage: c.exploreImage, order: c.order, seo: c.seo, display: c.display,
 });

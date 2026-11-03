@@ -93,7 +93,7 @@ const api = (path, opts = {}) => fetch(`${API_URL}/api/v1${path}`, {
 ## Business rules
 
 - **Products** have colours, sizes and one variant per colour × size, each with its own SKU, price, MRP and stock. Product details can include ordered wide banners and three-image rows. A product without options has one variant. Listing price, discount % and total stock are derived on save.
-- **Categories** nest up to 5 levels. Moving or renaming a branch updates every descendant and every product's category path. Disabling a category hides its whole branch and its products from the storefront. A category with subcategories or products can't be deleted.
+- **Categories** nest up to 5 levels. Moving or renaming a branch updates every descendant and every product's category path. Disabling a category hides its whole branch and its products from the storefront. A category with subcategories or products can't be deleted. Top-level category Shop all cards support their own uploaded background image.
 - **Totals** are always computed on the server from database prices, in this order: subtotal → coupon → prepaid discount (`commerce.prepaidOffPct`, online payments only) → shipping (free when subtotal − coupon ≥ `freeShippingAbove`, else `shippingFee`). Prices are tax-inclusive.
 - **Stock** changes only inside MongoDB transactions with conditional decrements, so concurrent buyers can't oversell. Every change writes an `InventoryMovement`.
 

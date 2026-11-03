@@ -302,6 +302,32 @@ describe("uploads (Cloudinary mocked)", () => {
     expect(destroyed).toEqual([up1.publicId]);
   });
 
+  it("stores, serves, replaces, and deletes a category Shop all background image", async () => {
+    const { destroyed } = mockCloudinary();
+    const upload = async (name, buffer = JPEG) => (await admin.agent.post(`${API}/admin/uploads`)
+      .set("X-CSRF-Token", admin.token)
+      .field("kind", "category")
+      .attach("file", buffer, name)
+      .expect(201)).body.data;
+    const first = await upload("explore.jpg");
+    const category = (await admin.post("/admin/categories", {
+      name: "Explore bags",
+      slug: "explore-bags",
+      exploreImage: first,
+    }).expect(201)).body.data;
+
+    expect(category.exploreImage.url).toBe(first.url);
+    const publicTree = (await request(app).get(`${API}/categories`).expect(200)).body.data;
+    expect(publicTree.find((item) => item.slug === category.slug).exploreImage.url).toBe(first.url);
+
+    const replacement = await upload("explore-replacement.png", PNG);
+    await admin.patch(`/admin/categories/${category.id}`, { exploreImage: replacement }).expect(200);
+    expect(destroyed).toEqual([first.publicId]);
+
+    await admin.del(`/admin/categories/${category.id}`).expect(200);
+    expect(destroyed).toEqual([first.publicId, replacement.publicId]);
+  });
+
   it("keeps an image that another record still uses", async () => {
     const { destroyed } = mockCloudinary();
     const up = (await admin.agent.post(`${API}/admin/uploads`).set("X-CSRF-Token", admin.token).field("kind", "category").attach("file", JPEG, "a.jpg").expect(201)).body.data;
