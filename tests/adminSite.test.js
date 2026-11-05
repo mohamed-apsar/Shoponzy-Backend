@@ -143,6 +143,10 @@ describe("contact, newsletter, SEO", () => {
     }).expect(200);
     const settings = (await pub("/site-settings").expect(200)).body.data.seo;
     expect(settings).toMatchObject({ googleVerification: "google-id", robotsMeta: "noindex, follow" });
+    const extendedRobots = "index, nofollow, noarchive, noimageindex, nosnippet, max-snippet:120, max-video-preview:0, max-image-preview:large";
+    await admin.patch("/admin/site-settings/seo", { robotsMeta: extendedRobots }).expect(200);
+    expect((await pub("/site-settings").expect(200)).body.data.seo.robotsMeta).toBe(extendedRobots);
+    await admin.patch("/admin/site-settings/seo", { robotsMeta: "index, follow, invalid-directive" }).expect(400);
     expect(settings.sitemapXml).toBeUndefined();
     expect((await pub("/seo/robots.txt").expect(200)).text).toBe("User-agent: *\nDisallow: /private\n");
     expect((await pub("/seo/sitemap.xml").expect(200)).text).toBe(sitemapXml);
