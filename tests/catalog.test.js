@@ -117,6 +117,34 @@ describe("admin products", () => {
     await admin.post("/admin/products", { name: "Y", category: String(cat._id), price: 1, images: [{ url: "https://evil.example/x.jpg" }] }).expect(400);
   });
 
+  it("stores, serves and releases product SEO metadata and its image", async () => {
+    const { destroyed } = mockCloudinary();
+    const jpeg = Buffer.concat([Buffer.from("ffd8ffe000104a4649460001", "hex"), Buffer.alloc(100)]);
+    const image = (await admin.agent.post(`${API}/admin/uploads`).set("X-CSRF-Token", admin.token)
+      .field("kind", "seo").attach("file", jpeg, "product-meta.jpg").expect(201)).body.data;
+    const cat = await category("Shoes");
+    const robots = "index, nofollow, max-snippet:120, max-video-preview:0, max-image-preview:large";
+    const created = await admin.post("/admin/products", {
+      name: "SEO Product", category: String(cat._id), price: 100,
+      seo: { title: "SEO Product title", description: "Search description", image, robots },
+    }).expect(201);
+    expect(created.body.data.seo).toMatchObject({
+      title: "SEO Product title", description: "Search description", image: { publicId: image.publicId }, robots,
+    });
+
+    const detail = await request(app).get(`${API}/products/${created.body.data.slug}`).expect(200);
+    expect(detail.body.data.seo).toMatchObject({
+      title: "SEO Product title", description: "Search description", image: { url: image.url }, robots,
+    });
+    await admin.patch(`/admin/products/${created.body.data.id}`, { seo: { title: "Updated product title" } }).expect(200);
+    expect((await admin.get(`/admin/products/${created.body.data.id}`).expect(200)).body.data.seo).toMatchObject({
+      title: "Updated product title", image: { publicId: image.publicId }, robots,
+    });
+    await admin.patch(`/admin/products/${created.body.data.id}`, { seo: { image: null } }).expect(200);
+    expect(destroyed).toEqual([image.publicId]);
+    await admin.patch(`/admin/products/${created.body.data.id}`, { seo: { robots: "index, unsafe" } }).expect(400);
+  });
+
   it("stores and releases featured and gallery images for each product colour", async () => {
     const { destroyed } = mockCloudinary();
     const jpeg = Buffer.concat([Buffer.from("ffd8ffe000104a4649460001", "hex"), Buffer.alloc(100)]);

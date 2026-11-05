@@ -4,7 +4,7 @@ const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Use a 6-digit hex colour.");
 // Internal paths ("/categories/shoes") or absolute http(s) URLs only — never javascript: etc.
 export const link = z.string().trim().max(500).refine((v) => v === "" || /^\/(?!\/)/.test(v) || /^https?:\/\//i.test(v), "Use a /path or an http(s):// URL.");
 const optionalUrl = z.string().trim().max(500).refine((v) => v === "" || /^https?:\/\//i.test(v), "Use an http(s):// URL.");
-const robotsMeta = z.string().trim().max(300).refine(
+export const robotsDirectivesSchema = z.string().trim().max(300).refine(
   (value) => value.split(",").every((directive) => /^(?:index|noindex|follow|nofollow|noarchive|noimageindex|nosnippet|max-snippet:-?\d+|max-video-preview:-?\d+|max-image-preview:(?:large|standard|none))$/.test(directive.trim().toLowerCase())),
   "Use supported robots meta directives.",
 );
@@ -53,7 +53,7 @@ export const SETTINGS_SCHEMAS = {
     title: text(70), description: text(160), keywords: text(300), canonical: optionalUrl,
     ogTitle: text(90), ogDescription: text(200), shareImage: imageRef,
     googleVerification: text(300), bingVerification: text(300), baiduVerification: text(300), yandexVerification: text(300),
-    robotsTxt: z.string().trim().max(10_000), robotsMeta,
+    robotsTxt: z.string().trim().max(10_000), robotsMeta: robotsDirectivesSchema,
     sitemapXml: sitemapXmlSchema,
   }).strict(),
   contact: z.object({

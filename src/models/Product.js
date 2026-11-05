@@ -1,9 +1,16 @@
 import mongoose from "mongoose";
 import { toJSONPlugin } from "./plugins.js";
-import { imageSchema, round2, seoSchema } from "./shared.js";
+import { imageSchema, round2 } from "./shared.js";
 
 export const PRODUCT_STATUSES = ["active", "disabled", "archived"];
 export const BADGES = ["", "Bestseller", "Trending", "New Drop"];
+
+const productSeoSchema = new mongoose.Schema({
+  title: { type: String, maxlength: 70, default: "" },
+  description: { type: String, maxlength: 160, default: "" },
+  image: { type: imageSchema, default: null },
+  robots: { type: String, maxlength: 300, default: "index, follow" },
+}, { _id: false });
 
 /* One purchasable combination. Products without options have a single variant (color/size null). */
 const variantSchema = new mongoose.Schema({
@@ -56,7 +63,7 @@ const productSchema = new mongoose.Schema({
   badge: { type: String, enum: BADGES, default: "" },
   occasions: [{ type: String, trim: true, maxlength: 40 }],
   status: { type: String, enum: PRODUCT_STATUSES, default: "active", index: true },
-  seo: { type: seoSchema, default: () => ({}) },
+  seo: { type: productSeoSchema, default: () => ({}) },
 
   // Derived on save from active variants — used for listing, filtering and sorting.
   minPrice: Number,

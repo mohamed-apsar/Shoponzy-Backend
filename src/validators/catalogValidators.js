@@ -1,12 +1,18 @@
 import { z } from "zod";
 import { objectId, pagination } from "./common.js";
-import { imageRef } from "./siteValidators.js";
+import { imageRef, robotsDirectivesSchema } from "./siteValidators.js";
 import { BADGES, PRODUCT_STATUSES } from "../models/Product.js";
 
 const slug = z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use lowercase letters, numbers and hyphens.").max(80);
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const money = z.coerce.number().min(0).max(10_000_000).refine((n) => Math.round(n * 100) === n * 100, "At most 2 decimal places.");
 const seo = z.object({ title: z.string().trim().max(70).default(""), description: z.string().trim().max(160).default("") }).strict();
+const productSeo = z.object({
+  title: z.string().trim().max(70).optional(),
+  description: z.string().trim().max(160).optional(),
+  image: imageRef.optional(),
+  robots: robotsDirectivesSchema.optional(),
+}).strict();
 const csv = (item) => z.union([z.array(item), z.string()]).transform((v) => (Array.isArray(v) ? v : v.split(",")).map((s) => String(s).trim()).filter(Boolean)).pipe(z.array(item).max(30));
 
 /* ---------- Categories ---------- */
@@ -80,7 +86,7 @@ const productBase = {
   badge: z.enum(BADGES).optional(),
   occasions: z.array(z.string().trim().max(40)).max(10).optional(),
   status: z.enum(PRODUCT_STATUSES).optional(),
-  seo: seo.optional(),
+  seo: productSeo.optional(),
 };
 const productRefine = (p, ctx) => {
   if (p.variants && (p.price !== undefined || p.stock !== undefined)) ctx.addIssue({ code: "custom", path: ["variants"], message: "Send either variants or price/stock, not both." });

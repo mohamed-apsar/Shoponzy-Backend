@@ -83,6 +83,7 @@ function productImageIds(product) {
     product.images,
     (product.colors || []).flatMap((color) => [color.featuredImage, ...(color.images || [])]),
     (product.contentBlocks || []).flatMap((block) => [block.image, ...(block.images || [])]),
+    product.seo?.image,
   );
 }
 
@@ -93,10 +94,11 @@ async function categoryPathFor(categoryId) {
 }
 
 export async function createProduct(input, actor) {
-  const { price: _p, mrp: _m, stock: _s, ...rest } = input;
+  const { price: _p, mrp: _m, stock: _s, seo, ...rest } = input;
   const opts = normaliseVariants(input);
   const product = new Product({
     ...rest, ...opts,
+    ...(seo ? { seo: { ...seo, ...(seo.image !== undefined ? { image: await resolveImages([seo.image]).then(([image]) => image) } : {}) } } : {}),
     colors: await resolveProductColors(opts.colors),
     contentBlocks: await resolveProductContentBlocks(input.contentBlocks),
     slug: await uniqueSlug(input.slug || slugify(input.name)),
@@ -117,8 +119,18 @@ export async function updateProduct(id, input, actor) {
   const oldImages = productImageIds(product);
   const before = new Map(product.variants.map((v) => [String(v._id), v.stock]));
 
-  const { price: _p, mrp: _m, stock: _s, images, contentBlocks, slug, category, variants: _v, colors: _c, sizes: _z, ...rest } = input;
+  const { price: _p, mrp: _m, stock: _s, images, contentBlocks, slug, category, variants: _v, colors: _c, sizes: _z, seo, ...rest } = input;
   Object.assign(product, rest);
+  if (seo) {
+    const currentSeo = product.seo?.toObject ? product.seo.toObject() : product.seo || {};
+    product.seo = {
+      ...currentSeo,
+      ...seo,
+      ...(seo.image !== undefined ? {
+        image: await resolveImageKeeping(seo.image, [currentSeo.image]),
+      } : {}),
+    };
+  }
   if (["variants", "colors", "sizes", "price", "mrp", "stock"].some((k) => input[k] !== undefined)) {
     const options = normaliseVariants(input, product);
     if (input.colors !== undefined) options.colors = await resolveProductColors(options.colors, product.colors);
@@ -135,7 +147,7 @@ export async function updateProduct(id, input, actor) {
   if (moves.length) {
     await InventoryMovement.insertMany(moves.map(({ v, delta }) => ({ product: product._id, variant: v._id, sku: v.sku, delta, reason: "adjustment", actor: actor?._id, note: "Edited in product form" })));
   }
-  if (images || input.colors !== undefined || contentBlocks !== undefined) {
+  if (images || input.colors !== undefined || contentBlocks !== undefined || seo?.image !== undefined) {
     const currentImages = productImageIds(product);
     await releaseImages(oldImages.filter((pid) => !currentImages.includes(pid)));
   }
