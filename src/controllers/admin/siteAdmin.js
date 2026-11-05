@@ -1,13 +1,14 @@
 import { audit, AuditLog } from "../../models/AuditLog.js";
-import { HomepageSection, NewsletterSubscriber } from "../../models/site.js";
+import { HomepageSection, NewsletterSubscriber, NotFoundLog } from "../../models/site.js";
 import { Coupon } from "../../models/commerce.js";
 import * as settings from "../../services/settingsService.js";
 import { dashboard as buildDashboard } from "../../services/dashboardService.js";
 import { imageIds, releaseImages, resolveImageKeeping, uploadImage } from "../../services/uploadService.js";
-import { SECTIONS, settingsPatchSchema } from "../../validators/siteValidators.js";
+import { SECTIONS, settingsPatchSchema, sitemapXmlSchema } from "../../validators/siteValidators.js";
 import { AppError } from "../../utils/AppError.js";
 import { created, ok, paginate } from "../../utils/respond.js";
 import { escapeRegex } from "../../validators/common.js";
+import { generateSitemap } from "../siteController.js";
 
 /* ---------- Dashboard ---------- */
 export async function dashboard(req, res) {
@@ -39,6 +40,52 @@ export async function resetSettings(req, res) {
   await audit("settings.reset", { actor: req.auth.user._id, entity: "SiteSetting", entityId: section, ip: req.ip });
   await releaseImages(imageIds(...IMAGE_KEYS.map((k) => previous[k])));
   ok(res, value);
+}
+
+export async function seo404Logs(req, res) {
+  const { limit, skip, meta } = paginate(req.valid.query);
+  const filter = req.valid.query.q ? { path: new RegExp(escapeRegex(req.valid.query.q), "i") } : {};
+  const [items, total] = await Promise.all([
+    NotFoundLog.find(filter).sort({ hits: -1, lastHitAt: -1 }).skip(skip).limit(limit).lean(),
+    NotFoundLog.countDocuments(filter),
+  ]);
+  ok(res, items.map(({ _id, ...item }) => ({ id: String(_id), ...item })), meta(total));
+}
+
+export async function updateSeo404Redirect(req, res) {
+  const item = await NotFoundLog.findByIdAndUpdate(req.params.id, { $set: req.valid.body }, { new: true, runValidators: true });
+  if (!item) throw AppError.notFound("404 log not found.");
+  await audit("seo.404.redirect.updated", { actor: req.auth.user._id, entity: "NotFoundLog", entityId: String(item._id), ip: req.ip });
+  const { _id, ...data } = item.toObject();
+  ok(res, { id: String(_id), ...data });
+}
+
+export async function deleteSeo404Log(req, res) {
+  const item = await NotFoundLog.findByIdAndDelete(req.params.id);
+  if (!item) throw AppError.notFound("404 log not found.");
+  await audit("seo.404.deleted", { actor: req.auth.user._id, entity: "NotFoundLog", entityId: String(item._id), ip: req.ip });
+  ok(res, { deleted: true });
+}
+
+export async function generateSeoSitemap(req, res) {
+  const sitemapXml = await generateSitemap();
+  await settings.updateSection("seo", { sitemapXml: "" });
+  await audit("seo.sitemap.generated", { actor: req.auth.user._id, entity: "SiteSetting", entityId: "seo", ip: req.ip });
+  ok(res, { sitemapXml, generatedAt: new Date().toISOString() });
+}
+
+export async function uploadSeoSitemap(req, res) {
+  if (!req.file) throw AppError.badRequest("Choose an XML sitemap file to upload.");
+  let sitemapXml;
+  try {
+    sitemapXml = new TextDecoder("utf-8", { fatal: true }).decode(req.file.buffer);
+  } catch {
+    throw AppError.badRequest("The sitemap must be a valid UTF-8 XML file.");
+  }
+  sitemapXml = sitemapXmlSchema.parse(sitemapXml);
+  const { value, previous } = await settings.updateSection("seo", { sitemapXml });
+  await audit("seo.sitemap.uploaded", { actor: req.auth.user._id, entity: "SiteSetting", entityId: "seo", ip: req.ip });
+  ok(res, { sitemapXml: value.sitemapXml, previousSitemap: Boolean(previous.sitemapXml) });
 }
 
 /* ---------- Homepage section ordering ---------- */
