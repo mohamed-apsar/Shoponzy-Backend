@@ -31,6 +31,8 @@ export const DEFAULT_SETTINGS = {
     description: "Shop shoes, sunglasses, perfumes, clothing, watches and essentials online at Shoponzy. Free delivery above ₹999, COD and 7-day returns.",
     keywords: "shoes, sunglasses, perfumes, clothing, watches, online shopping India", canonical: "https://shoponzy.in",
     ogTitle: "Shoponzy", ogDescription: "Shoes, sunglasses, perfumes, clothing, watches and essentials.", shareImage: null,
+    googleVerification: "", bingVerification: "", baiduVerification: "", yandexVerification: "",
+    robotsTxt: "", robotsMeta: "index, follow", sitemapXml: "",
   },
   contact: {
     email: "support@shoponzy.in", phone: "+91 90000 00000", whatsapp: "919000000000", address: "Shoponzy, Street, City, Tamil Nadu",
@@ -74,8 +76,11 @@ export async function resetSection(section) {
 export function publicSettings(all, now = new Date()) {
   const inWindow = (start, end) => (!start || new Date(start) <= now) && (!end || new Date(end) >= now);
   const a = all.announcement;
+  const publicSeo = { ...all.seo };
+  delete publicSeo.sitemapXml;
   return {
     ...all,
+    seo: publicSeo,
     announcement: { ...a, active: a.enabled && all.headerFooter.announcementVisible && inWindow(a.startDate, a.endDate) },
   };
 }

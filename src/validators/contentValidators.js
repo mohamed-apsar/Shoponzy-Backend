@@ -46,7 +46,11 @@ const pageBase = z.object({
   title: z.string().trim().min(1).max(120),
   slug: z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(80),
   description: z.string().trim().max(300).optional(), content: z.string().max(50_000).optional(),
-  seo: z.object({ title: z.string().trim().max(70).optional(), description: z.string().trim().max(160).optional() }).strict().optional(),
+  seo: z.object({
+    title: z.string().trim().max(70).optional(),
+    description: z.string().trim().max(160).optional(),
+    robots: z.enum(["index, follow", "noindex, follow", "index, nofollow", "noindex, nofollow"]).optional(),
+  }).strict().optional(),
   status: z.enum(["published", "draft"]).optional(),
 }).strict();
 export const createPageSchema = pageBase;
@@ -61,3 +65,7 @@ export const contactSchema = z.object({
 }).strict();
 export const newsletterSchema = z.object({ email, source: z.string().trim().max(40).optional() }).strict();
 export const contactStatusSchema = z.object({ status: z.enum(["new", "read", "closed"]) }).strict();
+export const notFoundTrackSchema = z.object({
+  path: z.string().trim().min(1).max(500).regex(/^\/(?!\/)[\w~.!$&'()*+,;=:@%/-]*$/, "Enter a local page path."),
+}).strict();
+export const notFoundRedirectSchema = z.object({ redirectTo: link }).strict();

@@ -127,6 +127,7 @@ const api = (path, opts = {}) => fetch(`${API_URL}/api/v1${path}`, {
 | GET | `/products` | `category` (path), `sub`, `cats`, `sizes`, `colors` (comma lists), `minPrice`, `maxPrice`, `sale=1`, `inStock=1`, `flag=new\|bestseller\|trending\|featured`, `q`, `sort=featured\|new\|low\|high\|off\|bestselling`, `page`, `limit` (≤60), `facets=0` to skip. Returns `data`, `meta`, `facets` {subcategories, categories, sizes, colors, price}, `category` |
 | GET | `/products/:slug` · `/products/:id/related` · `/products/by-ids?ids=` · `/products/legacy/:legacyId` | Variants show `inStock` and `stockLeft` (only when at or below the low-stock threshold), never exact stock |
 | GET | `/seo/sitemap.xml` · `/seo/robots.txt` | Serve at the storefront's `/sitemap.xml` and `/robots.txt` via a web-server proxy |
+| POST | `/seo/404 { path }` | Records a storefront not-found path and returns any configured redirect |
 | POST | `/contact` · `/newsletter` | Stored for the admin |
 
 ### Auth & account
@@ -169,7 +170,8 @@ const api = (path, opts = {}) => fetch(`${API_URL}/api/v1${path}`, {
 | Transactions | `GET /transactions?status=&provider=&q=&from=&to=` (+ totals by status) |
 | Customers | `GET /users?q=&status=&sort=`, `GET /users/:id` (orders, spend, addresses, wishlist), `PATCH /users/:id/status { status }` (disabling signs them out), `GET /wishlists` (most-saved products) |
 | Coupons | CRUD `/coupons` (`percent` ≤ 90 or `fixed`, min subtotal, max discount, dates, total/per-customer limits) |
-| Manage Site | `GET /site-settings`, `PATCH /site-settings/:section`, `POST /site-settings/:section/reset`. Sections: `general`, `branding`, `headerFooter`, `announcement`, `seo`, `contact`, `maintenance`, `commerce` (shipping, prepaid %, COD on/off and limit, delivery text, return days) |
+| Manage Site | `GET /site-settings`, `PATCH /site-settings/:section`, `POST /site-settings/:section/reset`. SEO settings include search metadata, webmaster verification IDs, robots.txt directives, robots meta rules, and an optional uploaded sitemap |
+| SEO tools | `POST /seo/sitemap/generate`, `POST /seo/sitemap/upload` (multipart field `file`), `GET /seo/404-logs?q=&page=&limit=`, `PATCH /seo/404-logs/:id { redirectTo }`, `DELETE /seo/404-logs/:id` |
 | Content | CRUD `/banners` (desktop + mobile image, or gradient + illustration, placement, order, schedule), `/homepage-sections` (+ `PUT /homepage-sections/order { ids }`), `/popups`, `/pages` |
 | Uploads | `POST /uploads` (multipart: `file`, `kind`=product\|category\|banner\|logo\|favicon\|popup\|seo\|maintenance) → `{ url, publicId, … }`, then pass that object as the image field. `DELETE /uploads/:publicId` discards an unused upload |
 | Other | `GET/PATCH /contact-messages`, `GET /newsletter`, `GET /newsletter/export.csv`, `GET /audit-logs?action=` |

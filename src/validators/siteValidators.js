@@ -11,6 +11,10 @@ const phoneText = z.string().trim().max(30);
 const text = (max) => z.string().trim().max(max);
 // "" and null clear the date. They must be matched before coerce.date(), which turns null into 1970-01-01.
 const date = z.union([z.literal(""), z.null(), z.coerce.date()]).transform((v) => (v ? v : null));
+export const sitemapXmlSchema = z.string().trim().max(8_000_000).refine(
+  (value) => !value || (/^(?:<\?xml\b[\s\S]*?\?>\s*)?<(urlset|sitemapindex)\b/i.test(value) && !/<!DOCTYPE|<!ENTITY/i.test(value)),
+  "Upload a valid sitemap XML file without a DTD or entity declarations.",
+);
 
 export const SETTINGS_SCHEMAS = {
   homeCategories: z.object({
@@ -44,6 +48,9 @@ export const SETTINGS_SCHEMAS = {
   seo: z.object({
     title: text(70), description: text(160), keywords: text(300), canonical: optionalUrl,
     ogTitle: text(90), ogDescription: text(200), shareImage: imageRef,
+    googleVerification: text(300), bingVerification: text(300), baiduVerification: text(300), yandexVerification: text(300),
+    robotsTxt: z.string().trim().max(10_000), robotsMeta: z.enum(["index, follow", "noindex, follow", "index, nofollow", "noindex, nofollow"]),
+    sitemapXml: sitemapXmlSchema,
   }).strict(),
   contact: z.object({
     email: z.union([z.string().email(), z.literal("")]), phone: phoneText,

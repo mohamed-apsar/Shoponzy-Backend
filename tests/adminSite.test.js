@@ -89,10 +89,13 @@ describe("banners, homepage sections, popups and pages", () => {
   });
 
   it("pages are public only when published; slugs are unique", async () => {
-    await admin.post("/admin/pages", { title: "Shipping policy", slug: "shipping-policy", content: "Ships in 2 days.", status: "published" }).expect(201);
+    const page = (await admin.post("/admin/pages", { title: "Shipping policy", slug: "shipping-policy", content: "Ships in 2 days.", status: "published" }).expect(201)).body.data;
+    await admin.patch(`/admin/pages/${page.id}`, { seo: { title: "Shipping | Shoponzy", description: "Shipping details.", robots: "noindex, follow" } }).expect(200);
     await admin.post("/admin/pages", { title: "Draft", slug: "draft" }).expect(201);
     await admin.post("/admin/pages", { title: "Dup", slug: "shipping-policy" }).expect(409);
-    expect((await pub("/pages/shipping-policy").expect(200)).body.data.content).toBe("Ships in 2 days.");
+    expect((await pub("/pages/shipping-policy").expect(200)).body.data).toMatchObject({
+      content: "Ships in 2 days.", seo: { title: "Shipping | Shoponzy", robots: "noindex, follow" },
+    });
     await pub("/pages/draft").expect(404);
     expect((await pub("/pages").expect(200)).body.data.map((p) => p.slug)).toEqual(["shipping-policy"]);
   });
@@ -131,6 +134,49 @@ describe("contact, newsletter, SEO", () => {
     expect(xml).toContain("<loc>http://localhost:5173/categories/shoes</loc>");
     expect(xml).toContain(`<loc>http://localhost:5173/products/${s.slug}</loc>`);
     expect((await pub("/seo/robots.txt").expect(200)).text).toContain("Sitemap: http://localhost:5173/sitemap.xml");
+  });
+
+  it("saves webmaster, robots and uploaded sitemap settings and serves them publicly", async () => {
+    const sitemapXml = '<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://shoponzy.in/custom</loc></url></urlset>';
+    await admin.patch("/admin/site-settings/seo", {
+      googleVerification: "google-id", robotsTxt: "User-agent: *\nDisallow: /private\n", robotsMeta: "noindex, follow", sitemapXml,
+    }).expect(200);
+    const settings = (await pub("/site-settings").expect(200)).body.data.seo;
+    expect(settings).toMatchObject({ googleVerification: "google-id", robotsMeta: "noindex, follow" });
+    expect(settings.sitemapXml).toBeUndefined();
+    expect((await pub("/seo/robots.txt").expect(200)).text).toBe("User-agent: *\nDisallow: /private\n");
+    expect((await pub("/seo/sitemap.xml").expect(200)).text).toBe(sitemapXml);
+    const uploaded = '<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://shoponzy.in/uploaded</loc></url></urlset>';
+    await admin.agent.post(`${API}/admin/seo/sitemap/upload`).set("X-CSRF-Token", admin.token)
+      .attach("file", Buffer.from(uploaded), { filename: "sitemap.xml", contentType: "application/xml" }).expect(200);
+    expect((await pub("/seo/sitemap.xml").expect(200)).text).toBe(uploaded);
+    await admin.agent.post(`${API}/admin/seo/sitemap/upload`).set("X-CSRF-Token", admin.token)
+      .attach("file", Buffer.from("<!DOCTYPE urlset><urlset/>"), { filename: "bad.xml", contentType: "application/xml" }).expect(400);
+    await admin.patch("/admin/site-settings/seo", { sitemapXml: "<!DOCTYPE urlset><urlset/>" }).expect(400);
+  });
+
+  it("tracks storefront 404s and lets admins manage redirects", async () => {
+    const storefront = await browser();
+    await storefront.post("/seo/404", { path: "/missing-page" }).expect(200);
+    await storefront.post("/seo/404", { path: "/missing-page" }).expect(200);
+    await storefront.post("/seo/404", { path: "//external.example" }).expect(400);
+
+    const logs = (await admin.get("/admin/seo/404-logs").expect(200)).body;
+    expect(logs.meta.total).toBe(1);
+    expect(logs.data[0]).toMatchObject({ path: "/missing-page", hits: 2, redirectTo: "" });
+    const id = logs.data[0].id;
+    await admin.patch(`/admin/seo/404-logs/${id}`, { redirectTo: "/products" }).expect(200);
+    expect((await storefront.post("/seo/404", { path: "/missing-page" }).expect(200)).body.data.redirectTo).toBe("/products");
+    await admin.patch(`/admin/seo/404-logs/${id}`, { redirectTo: "javascript:alert(1)" }).expect(400);
+    await admin.del(`/admin/seo/404-logs/${id}`).expect(200);
+    expect((await admin.get("/admin/seo/404-logs").expect(200)).body.meta.total).toBe(0);
+  });
+
+  it("generates and publishes a fresh sitemap from the current catalog", async () => {
+    const product = await sneaker();
+    const result = await admin.post("/admin/seo/sitemap/generate", {}).expect(200);
+    expect(result.body.data.sitemapXml).toContain(`<loc>http://localhost:5173/products/${product.slug}</loc>`);
+    expect((await pub("/seo/sitemap.xml").expect(200)).text).toBe(result.body.data.sitemapXml);
   });
 });
 

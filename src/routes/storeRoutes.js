@@ -9,7 +9,7 @@ import { cartOwner } from "../middleware/cartOwner.js";
 import { validate } from "../middleware/validate.js";
 import { formLimiter, checkoutLimiter, trackLimiter, loginIpLimiter } from "../middleware/rateLimits.js";
 import { idsQuery, publicProductsQuery } from "../validators/catalogValidators.js";
-import { contactSchema, newsletterSchema } from "../validators/contentValidators.js";
+import { contactSchema, newsletterSchema, notFoundTrackSchema } from "../validators/contentValidators.js";
 import { addCartItemSchema, addressSchema, cancelSchema, checkoutSchema, couponSchema, myOrdersQuery, trackOrderSchema, updateCartItemSchema, verifyPaymentSchema } from "../validators/commerceValidators.js";
 import { changePasswordSchema, deleteAccountSchema, forgotPasswordSchema, profileSchema, resetPasswordSchema, wishlistAddSchema, wishlistMergeSchema } from "../validators/accountValidators.js";
 import { objectId } from "../validators/common.js";
@@ -34,6 +34,7 @@ r.get("/products/:slug", catalog.productBySlug);
 r.get("/products/:id/related", idParam("id"), catalog.relatedProducts);
 r.get("/seo/sitemap.xml", site.sitemap);
 r.get("/seo/robots.txt", site.robots);
+r.post("/seo/404", validate({ body: notFoundTrackSchema }), site.trackNotFound);
 r.post("/contact", formLimiter, optionalAuth("customer"), validate({ body: contactSchema }), site.contact);
 r.post("/newsletter", formLimiter, validate({ body: newsletterSchema }), site.newsletter);
 

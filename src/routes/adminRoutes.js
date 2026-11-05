@@ -17,7 +17,7 @@ import { userStatusSchema } from "../validators/accountValidators.js";
 import { objectId } from "../validators/common.js";
 import { adminProductsQuery, bulkProductsSchema, createCategorySchema, createProductSchema, listCategoriesQuery, stockAdjustSchema, updateCategorySchema, updateProductSchema } from "../validators/catalogValidators.js";
 import { adminOrdersQuery, cancelSchema, createCouponSchema, listQuery, refundSchema, transactionsQuery, updateCouponSchema, updateFulfilmentSchema, updateOrderStatusSchema } from "../validators/commerceValidators.js";
-import { contactStatusSchema, createBannerSchema, createPageSchema, createPopupSchema, createSectionSchema, reorderSchema, updateBannerSchema, updatePageSchema, updatePopupSchema, updateSectionSchema } from "../validators/contentValidators.js";
+import { contactStatusSchema, createBannerSchema, createPageSchema, createPopupSchema, createSectionSchema, notFoundRedirectSchema, reorderSchema, updateBannerSchema, updatePageSchema, updatePopupSchema, updateSectionSchema } from "../validators/contentValidators.js";
 import { authRouter } from "./authRoutes.js";
 
 const router = Router();
@@ -82,6 +82,11 @@ resource("/coupons", crud(Coupon, { entity: "Coupon", searchFields: ["code", "de
 router.get("/site-settings", site.allSettings);
 router.patch("/site-settings/:section", site.updateSettings);
 router.post("/site-settings/:section/reset", site.resetSettings);
+router.post("/seo/sitemap/generate", site.generateSeoSitemap);
+router.post("/seo/sitemap/upload", upload.single("file"), site.uploadSeoSitemap);
+router.get("/seo/404-logs", validate({ query: listQuery }), site.seo404Logs);
+router.patch("/seo/404-logs/:id", id, validate({ body: notFoundRedirectSchema }), site.updateSeo404Redirect);
+router.delete("/seo/404-logs/:id", id, site.deleteSeo404Log);
 resource("/banners", crud(Banner, { entity: "Banner", searchFields: ["title", "subtitle"], imageFields: ["image", "mobileImage"], sort: { placement: 1, order: 1 } }), { create: createBannerSchema, update: updateBannerSchema });
 router.put("/homepage-sections/order", validate({ body: reorderSchema }), site.reorderSections);
 resource("/homepage-sections", crud(HomepageSection, { entity: "HomepageSection", searchFields: ["title"], sort: { order: 1 } }), { create: createSectionSchema, update: updateSectionSchema });

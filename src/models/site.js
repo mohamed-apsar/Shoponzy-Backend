@@ -80,11 +80,27 @@ const pageSchema = new mongoose.Schema({
   description: { type: String, maxlength: 300, default: "" },
   // Plain text with light Markdown (headings, lists, links). Rendered escaped by the storefront.
   content: { type: String, maxlength: 50_000, default: "" },
-  seo: { title: { type: String, maxlength: 70, default: "" }, description: { type: String, maxlength: 160, default: "" } },
+  seo: {
+    title: { type: String, maxlength: 70, default: "" },
+    description: { type: String, maxlength: 160, default: "" },
+    robots: { type: String, enum: ["index, follow", "noindex, follow", "index, nofollow", "noindex, nofollow"], default: "index, follow" },
+  },
   status: { type: String, enum: ["published", "draft"], default: "draft" },
 }, { timestamps: true });
 toJSONPlugin(pageSchema);
 export const Page = mongoose.model("Page", pageSchema);
+
+/* ---------- Storefront not-found tracking ---------- */
+const notFoundLogSchema = new mongoose.Schema({
+  path: { type: String, required: true, maxlength: 500 },
+  hits: { type: Number, default: 1, min: 1 },
+  lastHitAt: { type: Date, default: Date.now },
+  redirectTo: { type: String, maxlength: 500, default: "" },
+}, { timestamps: true });
+notFoundLogSchema.index({ path: 1 }, { unique: true });
+notFoundLogSchema.index({ hits: -1, lastHitAt: -1 });
+toJSONPlugin(notFoundLogSchema);
+export const NotFoundLog = mongoose.model("NotFoundLog", notFoundLogSchema);
 
 /* ---------- Contact messages & newsletter ---------- */
 const contactMessageSchema = new mongoose.Schema({

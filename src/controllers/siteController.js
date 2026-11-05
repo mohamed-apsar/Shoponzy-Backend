@@ -1,5 +1,5 @@
 import { env } from "../config/env.js";
-import { Page, ContactMessage, NewsletterSubscriber } from "../models/site.js";
+import { Page, ContactMessage, NewsletterSubscriber, NotFoundLog } from "../models/site.js";
 import { Product } from "../models/Product.js";
 import { Category } from "../models/Category.js";
 import { getAllSettings, publicSettings } from "../services/settingsService.js";
@@ -43,8 +43,27 @@ export async function newsletter(req, res) {
   ok(res, { subscribed: true });
 }
 
+export async function trackNotFound(req, res) {
+  const { path } = req.valid.body;
+  const log = await NotFoundLog.findOneAndUpdate(
+    { path },
+    { $setOnInsert: { path, redirectTo: "" }, $inc: { hits: 1 }, $set: { lastHitAt: new Date() } },
+    { upsert: true, new: true, setDefaultsOnInsert: false },
+  ).select("redirectTo").lean();
+  ok(res, { redirectTo: log.redirectTo });
+}
+
 /* sitemap.xml for the storefront domain (serve at https://shoponzy.in/sitemap.xml via the web server proxy). */
-export async function sitemap(_req, res) {
+export async function sitemap(req, res) {
+  const saved = req.query.refresh === "true" ? "" : (await getAllSettings()).seo.sitemapXml;
+  if (saved) {
+    res.type("application/xml").send(saved);
+    return;
+  }
+  res.type("application/xml").send(await generateSitemap());
+}
+
+export async function generateSitemap() {
   const base = env.CLIENT_URL.replace(/\/$/, "");
   const hidden = await hiddenCategoryIds();
   const [cats, products, pagesList] = await Promise.all([
@@ -60,10 +79,15 @@ export async function sitemap(_req, res) {
     ...products.map((p) => url(`/products/${p.slug}`, p.updatedAt)),
     ...pagesList.map((p) => url(`/pages/${p.slug}`, p.updatedAt)),
   ].join("");
-  res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${body}</urlset>`);
+  return `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${body}</urlset>`;
 }
 
-export function robots(_req, res) {
+export async function robots(_req, res) {
+  const saved = (await getAllSettings()).seo.robotsTxt;
+  if (saved) {
+    res.type("text/plain").send(saved.endsWith("\n") ? saved : `${saved}\n`);
+    return;
+  }
   const base = env.CLIENT_URL.replace(/\/$/, "");
   res.type("text/plain").send(`User-agent: *\nDisallow: /cart\nDisallow: /checkout\nDisallow: /account\nDisallow: /reset-password\nAllow: /\n\nSitemap: ${base}/sitemap.xml\n`);
 }
