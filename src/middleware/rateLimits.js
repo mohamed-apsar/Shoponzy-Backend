@@ -25,3 +25,5 @@ export const formLimiter = limiter(60 * 60_000, 20, "Too many submissions. Pleas
 export const checkoutLimiter = limiter(15 * 60_000, 30, "Too many checkout attempts. Please wait a few minutes.");
 // Order ID + phone lookups: low limit so phone numbers can't be enumerated.
 export const trackLimiter = limiter(15 * 60_000, 15, tooMany);
+// Return-request photos uploaded from the storefront.
+export const returnUploadLimiter = limiter(60 * 60_000, 30, "Too many uploads. Please try again later.");

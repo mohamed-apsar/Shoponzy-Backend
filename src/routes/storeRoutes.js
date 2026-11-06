@@ -4,10 +4,14 @@ import * as site from "../controllers/siteController.js";
 import * as cart from "../controllers/cartController.js";
 import * as orders from "../controllers/orderController.js";
 import * as account from "../controllers/accountController.js";
+import * as returns from "../controllers/returnController.js";
+import multer from "multer";
+import { UPLOAD_KINDS } from "../services/uploadService.js";
+import { createReturnSchema } from "../validators/returnValidators.js";
 import { authenticate, optionalAuth } from "../middleware/auth.js";
 import { cartOwner } from "../middleware/cartOwner.js";
 import { validate } from "../middleware/validate.js";
-import { formLimiter, checkoutLimiter, trackLimiter, loginIpLimiter } from "../middleware/rateLimits.js";
+import { formLimiter, checkoutLimiter, trackLimiter, loginIpLimiter, returnUploadLimiter } from "../middleware/rateLimits.js";
 import { idsQuery, publicProductsQuery } from "../validators/catalogValidators.js";
 import { contactSchema, newsletterSchema, notFoundTrackSchema } from "../validators/contentValidators.js";
 import { addCartItemSchema, addressSchema, cancelSchema, checkoutSchema, couponSchema, myOrdersQuery, trackOrderSchema, updateCartItemSchema, verifyPaymentSchema } from "../validators/commerceValidators.js";
@@ -53,6 +57,12 @@ r.post("/orders/track", trackLimiter, validate({ body: trackOrderSchema }), orde
 r.get("/orders", authenticate("customer"), cartOwner(), validate({ query: myOrdersQuery }), orders.myOrders);
 r.get("/orders/:orderNumber", optionalAuth("customer"), cartOwner(), orders.myOrder);
 r.post("/orders/:orderNumber/cancel", optionalAuth("customer"), cartOwner(), validate({ body: cancelSchema }), orders.cancelMyOrder);
+/* ---------- Returns (own orders: signed-in customer, or the guest browser that ordered) ---------- */
+const evidenceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: UPLOAD_KINDS.returnEvidence.maxBytes, files: 1, fields: 2 } });
+r.get("/orders/:orderNumber/returns", optionalAuth("customer"), cartOwner(), returns.orderReturns);
+r.post("/orders/:orderNumber/returns", formLimiter, optionalAuth("customer"), cartOwner(), validate({ body: createReturnSchema }), returns.requestReturn);
+r.post("/returns/uploads", returnUploadLimiter, optionalAuth("customer"), cartOwner(), evidenceUpload.single("file"), returns.uploadEvidence);
+r.post("/returns/:returnNumber/cancel", optionalAuth("customer"), cartOwner(), returns.cancelReturn);
 r.post("/payments/razorpay/verify", checkoutLimiter, validate({ body: verifyPaymentSchema }), orders.verifyRazorpay);
 r.post("/payments/webhook", orders.razorpayWebhook);
 

@@ -6,6 +6,7 @@ import { User } from "../models/User.js";
 import { env } from "../config/env.js";
 import { AppError } from "../utils/AppError.js";
 import { slugify } from "../utils/slugify.js";
+import { inTransaction } from "../utils/transaction.js";
 import { imageIds, releaseImages, resolveImageKeeping, resolveImages, resolveImagesKeeping } from "./uploadService.js";
 
 async function uniqueSlug(base, exceptId) {
@@ -170,20 +171,47 @@ export async function deleteProduct(id) {
   return { archived: false };
 }
 
-/* Atomic stock change for one variant. `set` is converted to a delta against the current value. */
-export async function adjustStock(productId, variantId, { delta, set, reason = "adjustment", note }, actor) {
-  const product = await Product.findOne({ _id: productId, "variants._id": variantId }, { "variants.$": 1 }).lean();
-  if (!product) throw AppError.notFound("Product or variant not found.");
-  const change = set !== undefined ? set - product.variants[0].stock : delta;
-  if (!Number.isInteger(change) || change === 0) throw AppError.badRequest("Nothing to change.");
-  const res = await Product.updateOne(
-    { _id: productId, variants: { $elemMatch: { _id: variantId, stock: { $gte: Math.max(0, -change) } } } },
-    { $inc: { "variants.$.stock": change, ...(product.variants[0].status === "active" ? { totalStock: change } : {}) } },
-  );
-  if (!res.modifiedCount) throw AppError.conflict("Stock changed in the meantime or would go below zero. Refresh and try again.");
-  await InventoryMovement.create({ product: productId, variant: variantId, sku: product.variants[0].sku, delta: change, reason, note, actor: actor?._id });
-  return Product.findById(productId);
+/* Manual stock change for one variant, inside a transaction together with its movement record.
+   `set` becomes a delta against the value read in the same transaction, and the update only applies
+   if the stock is still that value — so a concurrent order can't make "set to 10" land on 9.
+   `expectedStock` (optional) lets the admin UI refuse to save if the stock changed since it was shown. */
+export async function adjustStock(productId, variantId, { delta, set, reason = "adjustment", note, expectedStock }, actor) {
+  const movement = await inTransaction(async (session) => {
+    const product = await Product.findOne({ _id: productId, "variants._id": variantId }, { "variants.$": 1 }).session(session).lean();
+    if (!product) throw AppError.notFound("Product or variant not found.");
+    const variant = product.variants[0];
+    const before = variant.stock;
+    if (expectedStock !== undefined && expectedStock !== before) {
+      throw AppError.conflict(`Stock changed to ${before} since you opened this form. Review and try again.`);
+    }
+    const change = set !== undefined ? set - before : delta;
+    if (!Number.isInteger(change) || change === 0) throw AppError.badRequest("Nothing to change: the new quantity equals the current stock.");
+    if (before + change < 0) throw AppError.conflict(`Only ${before} in stock; you can remove at most ${before}.`);
+    const res = await Product.updateOne(
+      { _id: productId, variants: { $elemMatch: { _id: variantId, stock: before } } },
+      { $inc: { "variants.$.stock": change, ...(variant.status === "active" ? { totalStock: change } : {}) } },
+      { session },
+    );
+    if (!res.modifiedCount) throw AppError.conflict("Stock changed in the meantime. Refresh and try again.");
+    const mode = set !== undefined ? "set" : change > 0 ? "add" : "remove";
+    const [m] = await InventoryMovement.create([{
+      product: productId, variant: variantId, sku: variant.sku, delta: change, before, after: before + change,
+      mode, reason, note, actor: actor?._id,
+    }], { session });
+    return m;
+  });
+  return { product: await Product.findById(productId), movement };
 }
+
+/* Mongo expression: variants that are active, in stock and at/below the product's alert level. */
+export const lowVariantsExpr = (threshold) => ({
+  $filter: {
+    input: "$variants", as: "v",
+    cond: { $and: [{ $eq: ["$$v.status", "active"] }, { $gt: ["$$v.stock", 0] }, { $lte: ["$$v.stock", { $ifNull: ["$lowStockThreshold", threshold] }] }] },
+  },
+});
+/* Query filter: products with at least one low-stock variant. */
+export const lowStockFilter = (threshold) => ({ $expr: { $gt: [{ $size: lowVariantsExpr(threshold) }, 0] } });
 
 /* ---------- Storefront view ---------- */
 export function publicProduct(p, { includeContentBlocks = false } = {}) {

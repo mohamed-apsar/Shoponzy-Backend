@@ -72,6 +72,10 @@ export const SETTINGS_SCHEMAS = {
     codMaxOrderValue: z.number().min(0).max(1_000_000).nullable(),
     deliveryText: text(120), returnDays: z.number().int().min(0).max(60),
   }).strict(),
+  // Admin-only (not sent to the storefront): stock alert level used by Inventory Management.
+  inventory: z.object({
+    lowStockThreshold: z.number().int().min(0).max(100_000),
+  }).strict(),
 };
 
 export const SECTIONS = Object.keys(SETTINGS_SCHEMAS);

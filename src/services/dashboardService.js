@@ -2,7 +2,8 @@ import { Order } from "../models/commerce.js";
 import { Product } from "../models/Product.js";
 import { User } from "../models/User.js";
 import { round2 } from "../models/shared.js";
-import { env } from "../config/env.js";
+import { getLowStockThreshold } from "./inventoryService.js";
+import { lowStockFilter } from "./productService.js";
 
 const TZ = "Asia/Kolkata";
 // Orders that count as sales: placed and not cancelled/returned. Unpaid online orders don't count.
@@ -21,7 +22,7 @@ async function salesBetween(from, to) {
 export async function dashboard({ days = 30, now = new Date() } = {}) {
   const from = new Date(now.getTime() - days * 86_400_000);
   const prevFrom = new Date(from.getTime() - days * 86_400_000);
-  const low = env.LOW_STOCK_THRESHOLD;
+  const low = await getLowStockThreshold();
 
   const [cur, prev, customers, newCustomers, prevCustomers, products, pending, awaiting, attention, outOfStock, lowStockDocs, recent, trend, best] = await Promise.all([
     salesBetween(from, now),
@@ -34,8 +35,8 @@ export async function dashboard({ days = 30, now = new Date() } = {}) {
     Order.countDocuments({ status: "pending_payment" }),
     Order.countDocuments({ $or: [{ refundRequired: true }, { needsAttention: { $ne: null } }] }),
     Product.countDocuments({ status: "active", totalStock: 0 }),
-    Product.find({ status: "active", variants: { $elemMatch: { status: "active", stock: { $gt: 0, $lte: low } } } })
-      .select("name slug images variants").limit(10).lean(),
+    Product.find({ status: "active", ...lowStockFilter(low) })
+      .select("name slug images variants lowStockThreshold").limit(10).lean(),
     Order.find({ status: { $ne: "pending_payment" } }).sort({ createdAt: -1 }).limit(5)
       .select("orderNumber contact.name total status paymentStatus paymentMethod createdAt").lean(),
     Order.aggregate([
@@ -77,7 +78,7 @@ export async function dashboard({ days = 30, now = new Date() } = {}) {
       lowStockThreshold: low,
       lowStock: lowStockDocs.map((p) => ({
         id: String(p._id), name: p.name, slug: p.slug, image: p.images[0]?.url || null,
-        variants: p.variants.filter((v) => v.status === "active" && v.stock > 0 && v.stock <= low).map((v) => ({ id: String(v._id), sku: v.sku, color: v.color, size: v.size, stock: v.stock })),
+        variants: p.variants.filter((v) => v.status === "active" && v.stock > 0 && v.stock <= (p.lowStockThreshold ?? low)).map((v) => ({ id: String(v._id), sku: v.sku, color: v.color, size: v.size, stock: v.stock })),
       })),
     },
     recentOrders: recent.map((o) => ({ id: String(o._id), orderNumber: o.orderNumber, customer: o.contact.name, total: o.total, status: o.status, paymentStatus: o.paymentStatus, paymentMethod: o.paymentMethod, createdAt: o.createdAt })),

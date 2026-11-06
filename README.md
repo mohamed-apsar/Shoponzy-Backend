@@ -109,6 +109,17 @@ const api = (path, opts = {}) => fetch(`${API_URL}/api/v1${path}`, {
 
 - **Allowed admin transitions:** `placed → confirmed / packed / shipped / cancelled`, `confirmed → packed / shipped / cancelled`, `packed → shipped / cancelled`, `shipped → delivered / returned`, `delivered → returned`.
 - **Refunds** are admin-only. Razorpay orders are refunded through the Razorpay API (partial or full); COD refunds record the bank/UPI reference. A payment counts as paid only when Razorpay reports it captured *and* the amount matches. A signed callback alone is not enough.
+  - One refund per order at a time: the order is locked while the gateway call runs, so a double click can't refund twice.
+  - A Razorpay refund stays `pending` until Razorpay reports `processed` (webhook `refund.processed`, or `POST /admin/transactions/:id/refunds/:refundId/sync`). On `refund.failed` the amount goes back to the order's refundable balance and the order is flagged `refundRequired`.
+  - A late `payment.captured` webhook never turns a refunded payment back into "captured".
+- **Manual stock changes** (`POST /admin/products/:id/stock`) need a written reason (`note`, min 3 characters). Each one records the mode (add / remove / set), the stock before and after, and the admin. `set` only applies if the stock hasn't changed in the meantime; `expectedStock` lets the UI refuse to save if it moved since the form opened.
+- **Low stock** means an active variant with `0 < stock ≤ threshold`. The threshold is the product's `lowStockThreshold`, or else the store-wide `inventory.lowStockThreshold` setting (default `LOW_STOCK_THRESHOLD`; admin-only, never sent to the storefront).
+- **Returns** (`RT100001`, …): customers request them for delivered orders within `commerce.returnDays` of delivery, per item and quantity (partial returns allowed).
+  - Flow: `requested → approved → (pickup_scheduled → in_transit →) received → inspected → completed`. `requested → rejected` (reason required). `requested / approved / pickup_scheduled → cancelled`.
+  - Stock goes back **only at inspection**, for the units the inspector restocks (never for `unsellable` items).
+  - Approval makes a refund due (`pending`) on paid orders. It can be issued only after inspection, for at most what was paid for those items: line value minus a proportional share of coupon and prepaid discounts, excluding delivery.
+  - Refund status: `not_applicable / pending / processing / completed / failed`; it follows Razorpay. A return can't be completed while its refund is outstanding.
+  - When every unit of an order has come back through completed returns, the order becomes `returned` (without restocking a second time).
 - **Idempotency:** checkout takes an `idempotencyKey` (one per checkout attempt; a resubmit returns the same order). Webhook events are processed once per event id.
 - **Order numbers** are sequential: `SZ100001`, `SZ100002`, …
 
@@ -156,7 +167,11 @@ const api = (path, opts = {}) => fetch(`${API_URL}/api/v1${path}`, {
 | POST | `/orders/:orderNumber/cancel` | Customer: placed/confirmed only |
 | POST | `/orders/track` `{ orderNumber, phone }` | Status-only view, for guests |
 | POST | `/payments/razorpay/verify` | `{ orderNumber, razorpayOrderId, razorpayPaymentId, razorpaySignature }` from Checkout's success handler |
-| POST | `/payments/webhook` | Razorpay → server only |
+| POST | `/payments/webhook` | Razorpay → server only. Handles `payment.captured`, `order.paid`, `payment.failed` (with error source/step/reason) and `refund.*` |
+| GET | `/orders/:orderNumber/returns` | Own orders: `{ eligibility { eligible, reason, returnBy, items[{ variant, returnable }] }, returns[] }` |
+| POST | `/orders/:orderNumber/returns` | `{ items[{ variantId, qty }], reason, comments?, evidence?[{ publicId }] }`. Reasons: `damaged`, `wrong_item`, `defective`, `size_fit`, `not_as_described`, `missing_items`, `changed_mind`, `other` (needs comments) |
+| POST | `/returns/uploads` | Multipart `file`, into `shoponzy/returns/return-evidence`; only for customers with a delivered order (max 5 MB, rate limited) |
+| POST | `/returns/:returnNumber/cancel` | Customer: while `requested` |
 
 ### Admin (`/admin/*`, admin session required)
 
@@ -165,15 +180,17 @@ const api = (path, opts = {}) => fetch(`${API_URL}/api/v1${path}`, {
 | Auth | `POST /admin/auth/login`, `/refresh`, `/logout`, `GET /admin/auth/me` |
 | Dashboard | `GET /dashboard?days=7\|30\|90\|365`: sales, orders, AOV, customers (with % change vs. previous period), products, pending / awaiting payment / needs attention, out-of-stock and low-stock variants, recent orders, daily sales trend (IST), best sellers |
 | Categories | `GET /categories?level=&parent=&status=&q=` (with `pathNames`, `productCount`), `GET /categories/tree`, `POST`, `PATCH /:id` (incl. moving via `parent`), `DELETE /:id` |
-| Products | `GET /products?q=&category=&status=&stock=out\|low\|in&flag=&sort=` (+ status summary), `GET /:id`, `POST` (either `variants[]`, or `price`/`mrp`/`stock` for a simple product), `PATCH /:id`, `DELETE /:id` (archives if ordered), `POST /:id/stock { variantId, delta \| set, reason, note }`, `POST /products/bulk { ids, action }`, `GET /products/export.csv`, `GET /inventory/movements?product=` |
+| Products | `GET /products?q=&category=&status=&stock=out\|low\|in&flag=&sort=` (+ status summary), `GET /:id`, `POST` (either `variants[]`, or `price`/`mrp`/`stock` for a simple product), `PATCH /:id`, `DELETE /:id` (archives if ordered), `POST /:id/stock { variantId, delta \| set, reason, note, expectedStock? }`, `PATCH /:id/low-stock-threshold { lowStockThreshold \| null }`, `POST /products/bulk { ids, action }`, `GET /products/export.csv` |
+| Inventory | `GET /inventory?q=&category=&stockStatus=in\|low\|out\|inactive&sort=stock_low\|stock_high\|name\|updated` (one row per variant, with reserved qty and last movement), `GET /inventory/summary`, `GET\|PUT /inventory/settings { lowStockThreshold }`, `GET /inventory/movements?q=&product=&reason=&manual=1&from=&to=`, `GET /inventory/movements/export.csv` (same filters) |
 | Orders | `GET /orders?q=&status=&paymentStatus=&paymentMethod=&attention=1&from=&to=&customer=` (+ counts per status), `GET /:id` (+ payments, allowed transitions), `PATCH /:id/status { status, note?, fulfilment?, restock? }`, `PATCH /:id/fulfilment`, `POST /:id/cancel`, `POST /:id/refund { amount?, reason?, manualReference? }`, `GET /:id/invoice` (printable HTML) |
-| Transactions | `GET /transactions?status=&provider=&q=&from=&to=` (+ totals by status) |
+| Transactions | `GET /transactions?status=success\|failed\|pending\|refunded\|partially_refunded&method=upi\|card\|netbanking\|wallet\|emi\|paylater\|cod&q=&from=&to=&sort=` (+ `meta.summary`), `GET /transactions/summary`, `GET /transactions/:id`, `GET /transactions/export.csv` (same filters), `POST /transactions/:id/refunds/:refundId/sync`, `GET /refunds?status=pending\|processed\|failed&q=&from=&to=` |
+| Returns | `GET /returns?q=&status=&refundStatus=&view=open\|approved\|refunds&from=&to=`, `GET /returns/summary`, `GET /returns/items` (returned products), `GET /returns/:id`, `POST /returns/:id/approve { note? }`, `/reject { reason, note? }`, `/status { status: pickup_scheduled\|in_transit\|received\|completed\|cancelled, note?, pickup? }`, `/inspect { items[{ index, condition, restockQty }], notes? }`, `/refund { amount?, manualReference?, note? }` |
 | Customers | `GET /users?q=&status=&sort=`, `GET /users/:id` (orders, spend, addresses, wishlist), `PATCH /users/:id/status { status }` (disabling signs them out), `GET /wishlists` (most-saved products) |
 | Coupons | CRUD `/coupons` (`percent` ≤ 90 or `fixed`, min subtotal, max discount, dates, total/per-customer limits) |
 | Manage Site | `GET /site-settings`, `PATCH /site-settings/:section`, `POST /site-settings/:section/reset`. SEO settings include search metadata, webmaster verification IDs, robots.txt directives, robots meta rules, and an optional uploaded sitemap |
 | SEO tools | `POST /seo/sitemap/generate`, `POST /seo/sitemap/upload` (multipart field `file`), `GET /seo/404-logs?q=&page=&limit=`, `PATCH /seo/404-logs/:id { redirectTo }`, `DELETE /seo/404-logs/:id` |
 | Content | CRUD `/banners` (desktop + mobile image, or gradient + illustration, placement, order, schedule), `/homepage-sections` (+ `PUT /homepage-sections/order { ids }`), `/popups`, `/pages` |
-| Uploads | `POST /uploads` (multipart: `file`, `kind`=product\|category\|banner\|logo\|favicon\|popup\|seo\|maintenance) → `{ url, publicId, … }`, then pass that object as the image field. `DELETE /uploads/:publicId` discards an unused upload |
+| Uploads | `POST /uploads` (multipart: `file`, `kind`) → `{ url, publicId, … }`, then pass that object as the image field. `DELETE /uploads/:publicId` discards an unused upload. Kinds and Cloudinary folders (all under `shoponzy/`): `product` → products/product-images, `productGallery` → products/product-gallery, `productVariant` → products/product-variants, `category` → categories/category-images, `categoryBanner` → categories/category-banners, `banner` → banners/desktop, `bannerMobile` → banners/mobile, `logo` → branding/logos, `favicon` → branding/favicons, `popup` → popups, `seo` → seo, `maintenance` → site/maintenance, `site` → site/general, `returnEvidence` → returns/return-evidence. Assets uploaded before this layout keep their original public ids |
 | Other | `GET/PATCH /contact-messages`, `GET /newsletter`, `GET /newsletter/export.csv`, `GET /audit-logs?action=` |
 
 ## Background jobs

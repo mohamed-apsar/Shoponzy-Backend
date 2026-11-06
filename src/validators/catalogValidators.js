@@ -2,6 +2,7 @@ import { z } from "zod";
 import { objectId, pagination } from "./common.js";
 import { imageRef, robotsDirectivesSchema } from "./siteValidators.js";
 import { BADGES, PRODUCT_STATUSES } from "../models/Product.js";
+import { MANUAL_STOCK_REASONS } from "../models/commerce.js";
 
 const slug = z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use lowercase letters, numbers and hyphens.").max(80);
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
@@ -86,6 +87,7 @@ const productBase = {
   badge: z.enum(BADGES).optional(),
   occasions: z.array(z.string().trim().max(40)).max(10).optional(),
   status: z.enum(PRODUCT_STATUSES).optional(),
+  lowStockThreshold: z.number().int().min(0).max(100_000).nullable().optional(),
   seo: productSeo.optional(),
 };
 const productRefine = (p, ctx) => {
@@ -109,8 +111,11 @@ export const stockAdjustSchema = z.object({
   variantId: objectId,
   delta: z.number().int().min(-1_000_000).max(1_000_000).optional(),
   set: z.number().int().min(0).max(1_000_000).optional(),
-  reason: z.enum(["adjustment", "restock", "return"]).default("adjustment"),
-  note: z.string().trim().max(300).optional(),
+  reason: z.enum(MANUAL_STOCK_REASONS).default("adjustment"),
+  // Every manual change needs a written reason (kept in the stock history).
+  note: z.string({ required_error: "Enter a reason for this stock change." }).trim().min(3, "Enter a reason for this stock change.").max(300),
+  // Stock the admin saw when opening the form; the change is refused if it has moved since.
+  expectedStock: z.number().int().min(0).optional(),
 }).strict().refine((v) => (v.delta === undefined) !== (v.set === undefined), "Send either delta or set.");
 export const bulkProductsSchema = z.object({
   ids: z.array(objectId).min(1).max(200),

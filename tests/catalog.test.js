@@ -238,11 +238,13 @@ describe("admin products", () => {
   it("adjusts stock atomically, refusing to go below zero, and records the movement", async () => {
     const s = await sneaker({ stock: 2 });
     const v = variantOf(s, "Black", "9");
-    await admin.post(`/admin/products/${s._id}/stock`, { variantId: String(v._id), delta: -3 }).expect(409);
+    await admin.post(`/admin/products/${s._id}/stock`, { variantId: String(v._id), delta: -3, note: "Shrinkage" }).expect(409);
+    // A written reason is required for every manual change.
+    await admin.post(`/admin/products/${s._id}/stock`, { variantId: String(v._id), delta: 1 }).expect(400);
     const res = await admin.post(`/admin/products/${s._id}/stock`, { variantId: String(v._id), set: 10, reason: "restock", note: "Shipment" }).expect(200);
     expect(variantOf(res.body.data, "Black", "9").stock).toBe(10);
     expect(res.body.data.totalStock).toBe(2 * 6 + 8);
-    expect(await InventoryMovement.findOne({ reason: "restock" })).toMatchObject({ delta: 8, note: "Shipment" });
+    expect(await InventoryMovement.findOne({ reason: "restock" })).toMatchObject({ delta: 8, note: "Shipment", before: 2, after: 10, mode: "set" });
   });
 
   it("lists with search, stock filters and status summary; bulk-updates; exports CSV", async () => {

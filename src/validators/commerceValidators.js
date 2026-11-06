@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { email, name, objectId, pagination, phone } from "./common.js";
 import { ORDER_STATUSES, PAYMENT_STATUSES } from "../models/commerce.js";
+import { dateRange } from "./inventoryValidators.js";
 
 export const addressSchema = z.object({
   label: z.string().trim().max(40).optional(),
@@ -89,6 +90,16 @@ export const createCouponSchema = z.object(couponBase).strict().superRefine(coup
 export const updateCouponSchema = z.object(couponBase).partial().strict().superRefine(couponRefine);
 export const listQuery = z.object({ ...pagination, q: z.string().trim().max(100).optional(), status: z.string().max(20).optional() });
 export const transactionsQuery = z.object({
-  ...pagination, status: z.string().max(30).optional(), provider: z.enum(["razorpay", "cod"]).optional(),
-  q: z.string().trim().max(100).optional(), from: dateParam, to: dateParam,
+  ...pagination,
+  // success | failed | pending | refunded | partially_refunded (raw payment statuses are accepted too)
+  status: z.string().trim().regex(/^[a-z_]{1,30}$/).optional(),
+  provider: z.enum(["razorpay", "cod"]).optional(),
+  method: z.enum(["upi", "card", "netbanking", "wallet", "emi", "paylater", "cod"]).optional(),
+  sort: z.enum(["newest", "oldest", "amount_high", "amount_low"]).default("newest"),
+  q: z.string().trim().max(100).optional(), ...dateRange,
+});
+export const refundsQuery = z.object({
+  ...pagination,
+  status: z.enum(["pending", "processed", "failed"]).optional(),
+  q: z.string().trim().max(100).optional(), ...dateRange,
 });

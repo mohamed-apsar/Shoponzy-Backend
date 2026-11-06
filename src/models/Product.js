@@ -63,6 +63,8 @@ const productSchema = new mongoose.Schema({
   badge: { type: String, enum: BADGES, default: "" },
   occasions: [{ type: String, trim: true, maxlength: 40 }],
   status: { type: String, enum: PRODUCT_STATUSES, default: "active", index: true },
+  // Per-product low-stock alert level; null = the store-wide threshold (Inventory settings).
+  lowStockThreshold: { type: Number, min: 0, max: 100_000, default: null },
   seo: { type: productSeoSchema, default: () => ({}) },
 
   // Derived on save from active variants — used for listing, filtering and sorting.

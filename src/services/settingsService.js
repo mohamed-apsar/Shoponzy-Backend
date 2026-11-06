@@ -1,3 +1,4 @@
+import { env } from "../config/env.js";
 import { SiteSetting } from "../models/site.js";
 import { SECTIONS } from "../validators/siteValidators.js";
 
@@ -46,6 +47,7 @@ export const DEFAULT_SETTINGS = {
     freeShippingAbove: 999, shippingFee: 59, prepaidOffPct: 5, codEnabled: true, codMaxOrderValue: null,
     deliveryText: "Usually delivered in 3–7 working days", returnDays: 7,
   },
+  inventory: { lowStockThreshold: env.LOW_STOCK_THRESHOLD },
 };
 
 export async function getSection(section) {
@@ -78,8 +80,9 @@ export function publicSettings(all, now = new Date()) {
   const a = all.announcement;
   const publicSeo = { ...all.seo };
   delete publicSeo.sitemapXml;
+  const { inventory: _inventory, ...visible } = all;
   return {
-    ...all,
+    ...visible,
     seo: publicSeo,
     announcement: { ...a, active: a.enabled && all.headerFooter.announcementVisible && inWindow(a.startDate, a.endDate) },
   };
