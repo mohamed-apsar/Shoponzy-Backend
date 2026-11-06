@@ -130,3 +130,23 @@ export async function syncRefund(req, res) {
   await audit("refund.synced", { actor: req.auth.user._id, entity: "Payment", entityId: req.params.id, ip: req.ip, meta: { refundId: req.params.refundId, ...result } });
   ok(res, { ...result, transaction: await transactions.getTransaction(req.params.id) });
 }
+
+export async function exportRefunds(req, res) {
+  const { items } = await transactions.listRefunds(req.valid.query, { skip: 0, limit: MAX_EXPORT_ROWS });
+  const rows = [["refund_id", "transaction_id", "razorpay_payment_id", "order_id", "customer", "customer_email", "amount", "refund_status", "manual_cod", "initiated_at", "completed_at", "failed_at", "failure_reason", "reason", "issued_by", "return_id"]];
+  for (const r of items) {
+    rows.push([r.refundId, r.transactionId, r.razorpayPaymentId, r.order?.orderNumber, r.customer?.name, r.customer?.email, r.amount, r.status, r.manual ? "yes" : "no",
+      csvDate(r.initiatedAt), csvDate(r.processedAt), csvDate(r.failedAt), r.failureReason, r.reason, r.by?.name, r.returnRequest?.returnNumber]);
+  }
+  await audit("refunds.exported", { actor: req.auth.user._id, entity: "Payment", ip: req.ip, meta: { rows: items.length, filters: req.valid.query } });
+  sendCsv(res, `shoponzy-refunds-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+}
+
+/* Payment method breakdown (same scope as the Payment Methods page). */
+export async function exportMethods(req, res) {
+  const { byMethod } = await transactions.transactionSummary(req.valid.query);
+  const rows = [["payment_method", "transactions", "successful", "failed", "success_rate_pct", "amount_received", "amount_refunded"]];
+  for (const m of byMethod) rows.push([m.method === "unknown" ? "not chosen yet" : m.method, m.total, m.successful, m.failed, m.successRate ?? "", m.amount, m.refunded]);
+  await audit("transactions.methods_exported", { actor: req.auth.user._id, entity: "Payment", ip: req.ip, meta: { filters: req.valid.query } });
+  sendCsv(res, `shoponzy-payment-methods-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+}

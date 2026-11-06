@@ -45,3 +45,16 @@ export async function exportMovements(req, res) {
   await audit("inventory.history_exported", { actor: req.auth.user._id, entity: "InventoryMovement", ip: req.ip, meta: { rows: rows.length - 1 } });
   sendCsv(res, `shoponzy-stock-history-${new Date().toISOString().slice(0, 10)}.csv`, rows);
 }
+
+/* Stock list (one row per variant) with the same filters as the Inventory pages. */
+export async function exportStock(req, res) {
+  const { items } = await inventory.listStock({ ...req.valid.query, page: 1, limit: MAX_EXPORT_ROWS });
+  const rows = [["product", "variant", "sku", "brand", "category", "product_status", "variant_status", "price", "available_stock", "reserved", "low_stock_alert_at", "alert_level_source", "stock_status", "last_updated"]];
+  for (const i of items) {
+    rows.push([i.name, [i.color, i.size].filter(Boolean).join(" / "), i.sku, i.brand, i.category?.path || i.category?.name, i.productStatus, i.variantStatus,
+      i.price, i.stock, i.reserved, i.threshold, i.productThreshold === null || i.productThreshold === undefined ? "store default" : "product", i.stockStatus, csvDate(i.lastUpdated)]);
+  }
+  await audit("inventory.stock_exported", { actor: req.auth.user._id, entity: "Product", ip: req.ip, meta: { rows: items.length, filters: req.valid.query } });
+  const tag = req.valid.query.stockStatus ? `-${req.valid.query.stockStatus}` : "";
+  sendCsv(res, `shoponzy-stock${tag}-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+}

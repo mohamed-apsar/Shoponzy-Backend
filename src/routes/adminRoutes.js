@@ -3,7 +3,7 @@ import multer from "multer";
 import { z } from "zod";
 import { authenticate, requireRole } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
-import { listUsers } from "../controllers/adminUserController.js";
+import { exportUsers, listUsers } from "../controllers/adminUserController.js";
 import * as customers from "../controllers/admin/customersAdmin.js";
 import * as catalog from "../controllers/admin/catalogAdmin.js";
 import * as orders from "../controllers/admin/ordersAdmin.js";
@@ -47,6 +47,7 @@ router.get("/dashboard", site.dashboard);
 
 /* Customers */
 router.get("/users", validate({ query: listUsersQuery }), listUsers);
+router.get("/users/export.csv", validate({ query: listUsersQuery }), exportUsers);
 router.get("/users/:id", id, customers.getCustomer);
 router.patch("/users/:id/status", id, validate({ body: userStatusSchema }), customers.setStatus);
 router.get("/wishlists", customers.wishlistStats);
@@ -72,6 +73,7 @@ router.patch("/products/:id/low-stock-threshold", id, validate({ body: productTh
 /* Inventory Management (stock lives on product variants; history is the InventoryMovement log) */
 router.get("/inventory", validate({ query: inventoryQuery }), inventory.list);
 router.get("/inventory/summary", inventory.summary);
+router.get("/inventory/export.csv", validate({ query: inventoryQuery }), inventory.exportStock);
 router.get("/inventory/settings", inventory.getSettings);
 router.put("/inventory/settings", validate({ body: inventorySettingsSchema }), inventory.updateSettings);
 router.get("/inventory/movements", validate({ query: movementsQuery }), inventory.movements);
@@ -88,15 +90,20 @@ router.post("/orders/:id/refund", id, validate({ body: refundSchema }), orders.r
 router.get("/transactions", validate({ query: transactionsQuery }), orders.listTransactions);
 router.get("/transactions/summary", validate({ query: transactionsQuery }), orders.transactionSummary);
 router.get("/transactions/export.csv", validate({ query: transactionsQuery }), orders.exportTransactions);
+router.get("/transactions/methods.csv", validate({ query: transactionsQuery }), orders.exportMethods);
 router.get("/transactions/:id", id, orders.getTransaction);
 router.post("/transactions/:id/refunds/:refundId/sync", id, validate({ params: z.object({ id: objectId, refundId: z.string().trim().regex(/^[A-Za-z0-9_-]{1,80}$/) }) }), orders.syncRefund);
 router.get("/refunds", validate({ query: refundsQuery }), orders.listRefunds);
+router.get("/refunds/export.csv", validate({ query: refundsQuery }), orders.exportRefunds);
 
 /* Returns & refunds */
 router.get("/returns", validate({ query: adminReturnsQuery }), returnsAdmin.list);
 router.get("/returns/summary", validate({ query: returnSummaryQuery }), returnsAdmin.summary);
 router.get("/returns/items", validate({ query: adminReturnsQuery }), returnsAdmin.items);
 router.get("/returns/reasons", returnsAdmin.getReasons);
+router.get("/returns/reasons.csv", returnsAdmin.exportReasons);
+router.get("/returns/export.csv", validate({ query: adminReturnsQuery }), returnsAdmin.exportReturns);
+router.get("/returns/items/export.csv", validate({ query: adminReturnsQuery }), returnsAdmin.exportReturnedItems);
 router.put("/returns/reasons", validate({ body: returnReasonsSchema }), returnsAdmin.updateReasons);
 router.get("/returns/:id", id, returnsAdmin.get);
 router.post("/returns/:id/approve", id, validate({ body: approveReturnSchema }), returnsAdmin.approve);
