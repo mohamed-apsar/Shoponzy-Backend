@@ -4,6 +4,10 @@ const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Use a 6-digit hex colour.");
 // Internal paths ("/categories/shoes") or absolute http(s) URLs only — never javascript: etc.
 export const link = z.string().trim().max(500).refine((v) => v === "" || /^\/(?!\/)/.test(v) || /^https?:\/\//i.test(v), "Use a /path or an http(s):// URL.");
 const optionalUrl = z.string().trim().max(500).refine((v) => v === "" || /^https?:\/\//i.test(v), "Use an http(s):// URL.");
+export const robotsDirectivesSchema = z.string().trim().max(300).refine(
+  (value) => value.split(",").every((directive) => /^(?:index|noindex|follow|nofollow|noarchive|noimageindex|nosnippet|max-snippet:-?\d+|max-video-preview:-?\d+|max-image-preview:(?:large|standard|none))$/.test(directive.trim().toLowerCase())),
+  "Use supported robots meta directives.",
+);
 // An image previously uploaded via POST /admin/uploads (checked against the upload registry by the service).
 // Extra keys (width, bytes… from the upload response) are dropped, so the upload result can be passed straight back.
 export const imageRef = z.object({ url: z.string().url().max(1000), publicId: z.string().max(300).nullable().optional(), alt: z.string().max(200).optional() }).nullable();
@@ -49,7 +53,7 @@ export const SETTINGS_SCHEMAS = {
     title: text(70), description: text(160), keywords: text(300), canonical: optionalUrl,
     ogTitle: text(90), ogDescription: text(200), shareImage: imageRef,
     googleVerification: text(300), bingVerification: text(300), baiduVerification: text(300), yandexVerification: text(300),
-    robotsTxt: z.string().trim().max(10_000), robotsMeta: z.enum(["index, follow", "noindex, follow", "index, nofollow", "noindex, nofollow"]),
+    robotsTxt: z.string().trim().max(10_000), robotsMeta: robotsDirectivesSchema,
     sitemapXml: sitemapXmlSchema,
   }).strict(),
   contact: z.object({
@@ -67,6 +71,10 @@ export const SETTINGS_SCHEMAS = {
     prepaidOffPct: z.number().min(0).max(50), codEnabled: z.boolean(),
     codMaxOrderValue: z.number().min(0).max(1_000_000).nullable(),
     deliveryText: text(120), returnDays: z.number().int().min(0).max(60),
+  }).strict(),
+  // Admin-only (not sent to the storefront): stock alert level used by Inventory Management.
+  inventory: z.object({
+    lowStockThreshold: z.number().int().min(0).max(100_000),
   }).strict(),
 };
 

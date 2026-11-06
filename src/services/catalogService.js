@@ -71,7 +71,7 @@ export async function listProducts(q) {
     items: items.map(publicProduct),
     meta: { page: q.page, limit: q.limit, total, pages: Math.ceil(total / q.limit) },
     ...(facets ? { facets } : {}),
-    ...(category ? { category: { id: String(category._id), name: category.name, slug: category.slug, path: category.path, description: category.description, image: category.image, seo: category.seo, display: category.display } } : {}),
+    ...(category ? { category: { id: String(category._id), name: category.name, slug: category.slug, path: category.path, description: category.description, image: category.image, bannerImage: category.bannerImage, seo: category.seo, display: category.display } } : {}),
   };
 }
 
@@ -100,7 +100,7 @@ async function computeFacets(base, subs) {
 export async function getProductBySlug(slug) {
   const p = await Product.findOne({ slug, ...(await visibleFilter()) }).populate("category", "name slug path").lean();
   if (!p) throw AppError.notFound("Product not found.");
-  return publicProduct(p);
+  return publicProduct(p, { includeContentBlocks: true });
 }
 
 export async function relatedProducts(productId, limit = 10) {

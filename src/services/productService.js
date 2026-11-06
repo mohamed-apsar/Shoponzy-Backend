@@ -6,7 +6,8 @@ import { User } from "../models/User.js";
 import { env } from "../config/env.js";
 import { AppError } from "../utils/AppError.js";
 import { slugify } from "../utils/slugify.js";
-import { imageIds, releaseImages, resolveImages, resolveImagesKeeping } from "./uploadService.js";
+import { inTransaction } from "../utils/transaction.js";
+import { imageIds, releaseImages, resolveImageKeeping, resolveImages, resolveImagesKeeping } from "./uploadService.js";
 
 async function uniqueSlug(base, exceptId) {
   let slug = base, n = 1;
@@ -47,6 +48,46 @@ function normaliseVariants(input, existing) {
   return { colors, sizes, variants: variants.map((v) => ({ ...v, _id: v.id || prior.get(`${v.color}|${v.size}`) || new mongoose.Types.ObjectId(), sku: v.sku || undefined })) };
 }
 
+async function resolveProductColors(colors, existingColors = []) {
+  return Promise.all(colors.map(async (color, index) => {
+    const existing = existingColors.find((item) => item.name === color.name) || existingColors[index];
+    const existingImages = [existing?.featuredImage, ...(existing?.images || [])].filter(Boolean)
+      .map((image) => image.toObject ? image.toObject() : image);
+    const featuredImage = color.featuredImage === undefined
+      ? existing?.featuredImage || null
+      : await resolveImageKeeping(color.featuredImage, existingImages);
+    const images = color.images === undefined
+      ? existing?.images || []
+      : await resolveImagesKeeping(color.images, existingImages);
+    return { ...color, featuredImage, images };
+  }));
+}
+
+async function resolveProductContentBlocks(blocks = [], existingBlocks = []) {
+  return Promise.all(blocks.map(async (block, index) => {
+    const existing = existingBlocks[index]?.type === block.type ? existingBlocks[index] : null;
+    if (block.type === "banner") {
+      const existingImages = existing?.image ? [existing.image.toObject ? existing.image.toObject() : existing.image] : [];
+      return { type: block.type, image: await resolveImageKeeping(block.image, existingImages), images: [] };
+    }
+    const existingImages = (existing?.images || []).map((image) => image.toObject ? image.toObject() : image);
+    return {
+      type: block.type,
+      image: null,
+      images: await resolveImagesKeeping(block.images, existingImages),
+    };
+  }));
+}
+
+function productImageIds(product) {
+  return imageIds(
+    product.images,
+    (product.colors || []).flatMap((color) => [color.featuredImage, ...(color.images || [])]),
+    (product.contentBlocks || []).flatMap((block) => [block.image, ...(block.images || [])]),
+    product.seo?.image,
+  );
+}
+
 async function categoryPathFor(categoryId) {
   const cat = await Category.findById(categoryId).lean();
   if (!cat) throw AppError.badRequest("Category not found.");
@@ -54,10 +95,13 @@ async function categoryPathFor(categoryId) {
 }
 
 export async function createProduct(input, actor) {
-  const { price: _p, mrp: _m, stock: _s, ...rest } = input;
+  const { price: _p, mrp: _m, stock: _s, seo, ...rest } = input;
   const opts = normaliseVariants(input);
   const product = new Product({
     ...rest, ...opts,
+    ...(seo ? { seo: { ...seo, ...(seo.image !== undefined ? { image: await resolveImages([seo.image]).then(([image]) => image) } : {}) } } : {}),
+    colors: await resolveProductColors(opts.colors),
+    contentBlocks: await resolveProductContentBlocks(input.contentBlocks),
     slug: await uniqueSlug(input.slug || slugify(input.name)),
     categoryPath: await categoryPathFor(input.category),
     images: await resolveImages(input.images),
@@ -73,15 +117,30 @@ export async function createProduct(input, actor) {
 export async function updateProduct(id, input, actor) {
   const product = await Product.findById(id);
   if (!product) throw AppError.notFound("Product not found.");
-  const oldImages = imageIds(product.images);
+  const oldImages = productImageIds(product);
   const before = new Map(product.variants.map((v) => [String(v._id), v.stock]));
 
-  const { price: _p, mrp: _m, stock: _s, images, slug, category, variants: _v, colors: _c, sizes: _z, ...rest } = input;
+  const { price: _p, mrp: _m, stock: _s, images, contentBlocks, slug, category, variants: _v, colors: _c, sizes: _z, seo, ...rest } = input;
   Object.assign(product, rest);
-  if (["variants", "colors", "sizes", "price", "mrp", "stock"].some((k) => input[k] !== undefined)) Object.assign(product, normaliseVariants(input, product));
+  if (seo) {
+    const currentSeo = product.seo?.toObject ? product.seo.toObject() : product.seo || {};
+    product.seo = {
+      ...currentSeo,
+      ...seo,
+      ...(seo.image !== undefined ? {
+        image: await resolveImageKeeping(seo.image, [currentSeo.image]),
+      } : {}),
+    };
+  }
+  if (["variants", "colors", "sizes", "price", "mrp", "stock"].some((k) => input[k] !== undefined)) {
+    const options = normaliseVariants(input, product);
+    if (input.colors !== undefined) options.colors = await resolveProductColors(options.colors, product.colors);
+    Object.assign(product, options);
+  }
   if (slug && slug !== product.slug) product.slug = await uniqueSlug(slug, product._id);
   if (category) { product.category = category; product.categoryPath = await categoryPathFor(category); }
   if (images) product.images = await resolveImagesKeeping(images, product.images.map((i) => (i.toObject ? i.toObject() : i)));
+  if (contentBlocks !== undefined) product.contentBlocks = await resolveProductContentBlocks(contentBlocks, product.contentBlocks);
   await product.save();
 
   // Manual stock edits through the form are recorded like any other adjustment.
@@ -89,7 +148,10 @@ export async function updateProduct(id, input, actor) {
   if (moves.length) {
     await InventoryMovement.insertMany(moves.map(({ v, delta }) => ({ product: product._id, variant: v._id, sku: v.sku, delta, reason: "adjustment", actor: actor?._id, note: "Edited in product form" })));
   }
-  if (images) await releaseImages(oldImages.filter((pid) => !imageIds(product.images).includes(pid)));
+  if (images || input.colors !== undefined || contentBlocks !== undefined || seo?.image !== undefined) {
+    const currentImages = productImageIds(product);
+    await releaseImages(oldImages.filter((pid) => !currentImages.includes(pid)));
+  }
   return product;
 }
 
@@ -105,27 +167,54 @@ export async function deleteProduct(id) {
     return { archived: true, product };
   }
   await product.deleteOne();
-  await releaseImages(imageIds(product.images));
+  await releaseImages(productImageIds(product));
   return { archived: false };
 }
 
-/* Atomic stock change for one variant. `set` is converted to a delta against the current value. */
-export async function adjustStock(productId, variantId, { delta, set, reason = "adjustment", note }, actor) {
-  const product = await Product.findOne({ _id: productId, "variants._id": variantId }, { "variants.$": 1 }).lean();
-  if (!product) throw AppError.notFound("Product or variant not found.");
-  const change = set !== undefined ? set - product.variants[0].stock : delta;
-  if (!Number.isInteger(change) || change === 0) throw AppError.badRequest("Nothing to change.");
-  const res = await Product.updateOne(
-    { _id: productId, variants: { $elemMatch: { _id: variantId, stock: { $gte: Math.max(0, -change) } } } },
-    { $inc: { "variants.$.stock": change, ...(product.variants[0].status === "active" ? { totalStock: change } : {}) } },
-  );
-  if (!res.modifiedCount) throw AppError.conflict("Stock changed in the meantime or would go below zero. Refresh and try again.");
-  await InventoryMovement.create({ product: productId, variant: variantId, sku: product.variants[0].sku, delta: change, reason, note, actor: actor?._id });
-  return Product.findById(productId);
+/* Manual stock change for one variant, inside a transaction together with its movement record.
+   `set` becomes a delta against the value read in the same transaction, and the update only applies
+   if the stock is still that value — so a concurrent order can't make "set to 10" land on 9.
+   `expectedStock` (optional) lets the admin UI refuse to save if the stock changed since it was shown. */
+export async function adjustStock(productId, variantId, { delta, set, reason = "adjustment", note, expectedStock }, actor) {
+  const movement = await inTransaction(async (session) => {
+    const product = await Product.findOne({ _id: productId, "variants._id": variantId }, { "variants.$": 1 }).session(session).lean();
+    if (!product) throw AppError.notFound("Product or variant not found.");
+    const variant = product.variants[0];
+    const before = variant.stock;
+    if (expectedStock !== undefined && expectedStock !== before) {
+      throw AppError.conflict(`Stock changed to ${before} since you opened this form. Review and try again.`);
+    }
+    const change = set !== undefined ? set - before : delta;
+    if (!Number.isInteger(change) || change === 0) throw AppError.badRequest("Nothing to change: the new quantity equals the current stock.");
+    if (before + change < 0) throw AppError.conflict(`Only ${before} in stock; you can remove at most ${before}.`);
+    const res = await Product.updateOne(
+      { _id: productId, variants: { $elemMatch: { _id: variantId, stock: before } } },
+      { $inc: { "variants.$.stock": change, ...(variant.status === "active" ? { totalStock: change } : {}) } },
+      { session },
+    );
+    if (!res.modifiedCount) throw AppError.conflict("Stock changed in the meantime. Refresh and try again.");
+    const mode = set !== undefined ? "set" : change > 0 ? "add" : "remove";
+    const [m] = await InventoryMovement.create([{
+      product: productId, variant: variantId, sku: variant.sku, delta: change, before, after: before + change,
+      mode, reason, note, actor: actor?._id,
+    }], { session });
+    return m;
+  });
+  return { product: await Product.findById(productId), movement };
 }
 
+/* Mongo expression: variants that are active, in stock and at/below the product's alert level. */
+export const lowVariantsExpr = (threshold) => ({
+  $filter: {
+    input: "$variants", as: "v",
+    cond: { $and: [{ $eq: ["$$v.status", "active"] }, { $gt: ["$$v.stock", 0] }, { $lte: ["$$v.stock", { $ifNull: ["$lowStockThreshold", threshold] }] }] },
+  },
+});
+/* Query filter: products with at least one low-stock variant. */
+export const lowStockFilter = (threshold) => ({ $expr: { $gt: [{ $size: lowVariantsExpr(threshold) }, 0] } });
+
 /* ---------- Storefront view ---------- */
-export function publicProduct(p) {
+export function publicProduct(p, { includeContentBlocks = false } = {}) {
   const low = env.LOW_STOCK_THRESHOLD;
   return {
     id: String(p._id), slug: p.slug, legacyId: p.legacyId, name: p.name, brand: p.brand,
@@ -134,7 +223,16 @@ export function publicProduct(p) {
       ? { id: String(p.category._id), name: p.category.name, slug: p.category.slug, path: p.category.path }
       : String(p.category),
     categoryPath: (p.categoryPath || []).map(String),
-    images: p.images, colors: p.colors, sizes: p.sizes, specs: p.specs,
+    images: p.images,
+    colors: p.colors.map((color) => ({
+      name: color.name, hex: color.hex, featuredImage: color.featuredImage || null, images: color.images || [],
+    })),
+    ...(includeContentBlocks ? {
+      contentBlocks: (p.contentBlocks || []).map((block) => ({
+        type: block.type, image: block.image || null, images: block.images || [],
+      })),
+    } : {}),
+    sizes: p.sizes, specs: p.specs,
     // Exact stock is not exposed; "only N left" appears at or below the low-stock threshold.
     variants: p.variants.filter((v) => v.status === "active").map((v) => ({
       id: String(v._id), sku: v.sku, color: v.color, size: v.size, price: v.price, mrp: v.mrp,

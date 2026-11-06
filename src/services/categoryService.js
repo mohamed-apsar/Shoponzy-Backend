@@ -26,7 +26,14 @@ export async function createCategory(data) {
   const place = placement(parent, data.slug);
   if (place.level > MAX_CATEGORY_LEVEL) throw AppError.badRequest(`Categories can be nested at most ${MAX_CATEGORY_LEVEL} levels deep.`);
   await assertUniqueSlug(place.parent, data.slug);
-  return Category.create({ ...data, ...place, image: await resolveImage(data.image) });
+  return Category.create({
+    ...data,
+    ...place,
+    image: await resolveImage(data.image),
+    productImage: await resolveImage(data.productImage),
+    exploreImage: await resolveImage(data.exploreImage),
+    bannerImage: await resolveImage(data.bannerImage),
+  });
 }
 
 /* Re-derives ancestors/level/path for every descendant, and categoryPath for affected products. */
@@ -48,6 +55,9 @@ export async function updateCategory(id, data) {
   const cat = await Category.findById(id);
   if (!cat) throw AppError.notFound("Category not found.");
   const oldImage = cat.image;
+  const oldProductImage = cat.productImage;
+  const oldExploreImage = cat.exploreImage;
+  const oldBannerImage = cat.bannerImage;
 
   const parentChanged = data.parent !== undefined && String(data.parent || "") !== String(cat.parent || "");
   const slugChanged = data.slug !== undefined && data.slug !== cat.slug;
@@ -66,12 +76,18 @@ export async function updateCategory(id, data) {
     Object.assign(cat, place, { slug });
   }
 
-  const { parent: _p, slug: _s, image, ...rest } = data;
+  const { parent: _p, slug: _s, image, productImage, exploreImage, bannerImage, ...rest } = data;
   Object.assign(cat, rest);
   if (image !== undefined) cat.image = await resolveImageKeeping(image, cat.image?.toObject?.() ?? cat.image);
+  if (productImage !== undefined) cat.productImage = await resolveImageKeeping(productImage, cat.productImage?.toObject?.() ?? cat.productImage);
+  if (exploreImage !== undefined) cat.exploreImage = await resolveImageKeeping(exploreImage, cat.exploreImage?.toObject?.() ?? cat.exploreImage);
+  if (bannerImage !== undefined) cat.bannerImage = await resolveImageKeeping(bannerImage, cat.bannerImage?.toObject?.() ?? cat.bannerImage);
   await cat.save();
   if (parentChanged || slugChanged) await rebuildBranch(cat);
   if (image !== undefined && oldImage?.publicId !== cat.image?.publicId) await releaseImages(imageIds(oldImage));
+  if (productImage !== undefined && oldProductImage?.publicId !== cat.productImage?.publicId) await releaseImages(imageIds(oldProductImage));
+  if (exploreImage !== undefined && oldExploreImage?.publicId !== cat.exploreImage?.publicId) await releaseImages(imageIds(oldExploreImage));
+  if (bannerImage !== undefined && oldBannerImage?.publicId !== cat.bannerImage?.publicId) await releaseImages(imageIds(oldBannerImage));
   return cat;
 }
 
@@ -84,7 +100,7 @@ export async function deleteCategory(id) {
   if (products) throw AppError.conflict(`${products} product${products === 1 ? " is" : "s are"} still in this category. Move or archive them first.`);
   await Product.updateMany({ categoryPath: cat._id }, { $pull: { categoryPath: cat._id } });
   await cat.deleteOne();
-  await releaseImages(imageIds(cat.image));
+  await releaseImages(imageIds(cat.image, cat.productImage, cat.exploreImage, cat.bannerImage));
 }
 
 /* Ids of disabled categories and everything below them: their products are hidden from the storefront. */
@@ -108,5 +124,5 @@ export async function publicTree() {
 
 export const publicCategory = (c) => ({
   id: String(c._id), name: c.name, slug: c.slug, path: c.path, level: c.level, parent: c.parent ? String(c.parent) : null,
-  description: c.description, image: c.image, order: c.order, seo: c.seo, display: c.display,
+  description: c.description, image: c.image, productImage: c.productImage, exploreImage: c.exploreImage, bannerImage: c.bannerImage, order: c.order, seo: c.seo, display: c.display,
 });

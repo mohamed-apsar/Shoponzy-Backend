@@ -8,15 +8,19 @@ import * as customers from "../controllers/admin/customersAdmin.js";
 import * as catalog from "../controllers/admin/catalogAdmin.js";
 import * as orders from "../controllers/admin/ordersAdmin.js";
 import * as site from "../controllers/admin/siteAdmin.js";
+import * as inventory from "../controllers/admin/inventoryAdmin.js";
+import * as returnsAdmin from "../controllers/admin/returnsAdmin.js";
+import { adminReturnsQuery, approveReturnSchema, inspectReturnSchema, rejectReturnSchema, returnRefundSchema, returnStatusSchema, returnSummaryQuery } from "../validators/returnValidators.js";
 import { crud } from "../controllers/admin/crud.js";
 import { Coupon } from "../models/commerce.js";
 import { Banner, ContactMessage, HomepageSection, Page, Popup } from "../models/site.js";
 import { MAX_UPLOAD_BYTES } from "../services/uploadService.js";
 import { listUsersQuery } from "../validators/userValidators.js";
+import { inventoryQuery, inventorySettingsSchema, movementsQuery, productThresholdSchema } from "../validators/inventoryValidators.js";
 import { userStatusSchema } from "../validators/accountValidators.js";
 import { objectId } from "../validators/common.js";
 import { adminProductsQuery, bulkProductsSchema, createCategorySchema, createProductSchema, listCategoriesQuery, stockAdjustSchema, updateCategorySchema, updateProductSchema } from "../validators/catalogValidators.js";
-import { adminOrdersQuery, cancelSchema, createCouponSchema, listQuery, refundSchema, transactionsQuery, updateCouponSchema, updateFulfilmentSchema, updateOrderStatusSchema } from "../validators/commerceValidators.js";
+import { adminOrdersQuery, cancelSchema, createCouponSchema, listQuery, refundSchema, refundsQuery, transactionsQuery, updateCouponSchema, updateFulfilmentSchema, updateOrderStatusSchema } from "../validators/commerceValidators.js";
 import { contactStatusSchema, createBannerSchema, createPageSchema, createPopupSchema, createSectionSchema, notFoundRedirectSchema, reorderSchema, updateBannerSchema, updatePageSchema, updatePopupSchema, updateSectionSchema } from "../validators/contentValidators.js";
 import { authRouter } from "./authRoutes.js";
 
@@ -63,7 +67,15 @@ router.post("/products", validate({ body: createProductSchema }), catalog.create
 router.patch("/products/:id", id, validate({ body: updateProductSchema }), catalog.updateProduct);
 router.delete("/products/:id", id, catalog.deleteProduct);
 router.post("/products/:id/stock", id, validate({ body: stockAdjustSchema }), catalog.adjustStock);
-router.get("/inventory/movements", catalog.inventoryMovements);
+router.patch("/products/:id/low-stock-threshold", id, validate({ body: productThresholdSchema }), inventory.setProductThreshold);
+
+/* Inventory Management (stock lives on product variants; history is the InventoryMovement log) */
+router.get("/inventory", validate({ query: inventoryQuery }), inventory.list);
+router.get("/inventory/summary", inventory.summary);
+router.get("/inventory/settings", inventory.getSettings);
+router.put("/inventory/settings", validate({ body: inventorySettingsSchema }), inventory.updateSettings);
+router.get("/inventory/movements", validate({ query: movementsQuery }), inventory.movements);
+router.get("/inventory/movements/export.csv", validate({ query: movementsQuery }), inventory.exportMovements);
 
 /* Orders & transactions */
 router.get("/orders", validate({ query: adminOrdersQuery }), orders.listOrders);
@@ -74,6 +86,22 @@ router.patch("/orders/:id/fulfilment", id, validate({ body: updateFulfilmentSche
 router.post("/orders/:id/cancel", id, validate({ body: cancelSchema }), orders.cancel);
 router.post("/orders/:id/refund", id, validate({ body: refundSchema }), orders.refund);
 router.get("/transactions", validate({ query: transactionsQuery }), orders.listTransactions);
+router.get("/transactions/summary", validate({ query: transactionsQuery }), orders.transactionSummary);
+router.get("/transactions/export.csv", validate({ query: transactionsQuery }), orders.exportTransactions);
+router.get("/transactions/:id", id, orders.getTransaction);
+router.post("/transactions/:id/refunds/:refundId/sync", id, validate({ params: z.object({ id: objectId, refundId: z.string().trim().regex(/^[A-Za-z0-9_-]{1,80}$/) }) }), orders.syncRefund);
+router.get("/refunds", validate({ query: refundsQuery }), orders.listRefunds);
+
+/* Returns & refunds */
+router.get("/returns", validate({ query: adminReturnsQuery }), returnsAdmin.list);
+router.get("/returns/summary", validate({ query: returnSummaryQuery }), returnsAdmin.summary);
+router.get("/returns/items", validate({ query: adminReturnsQuery }), returnsAdmin.items);
+router.get("/returns/:id", id, returnsAdmin.get);
+router.post("/returns/:id/approve", id, validate({ body: approveReturnSchema }), returnsAdmin.approve);
+router.post("/returns/:id/reject", id, validate({ body: rejectReturnSchema }), returnsAdmin.reject);
+router.post("/returns/:id/status", id, validate({ body: returnStatusSchema }), returnsAdmin.setStatus);
+router.post("/returns/:id/inspect", id, validate({ body: inspectReturnSchema }), returnsAdmin.inspect);
+router.post("/returns/:id/refund", id, validate({ body: returnRefundSchema }), returnsAdmin.refund);
 
 /* Coupons */
 resource("/coupons", crud(Coupon, { entity: "Coupon", searchFields: ["code", "description"] }), { create: createCouponSchema, update: updateCouponSchema, guard: [site.couponGuard] });

@@ -1,14 +1,15 @@
 import mongoose from "mongoose";
 import { env } from "../config/env.js";
-import { Cart, Coupon, InventoryMovement, Order, Payment, nextSequence } from "../models/commerce.js";
+import { Cart, Coupon, InventoryMovement, Order, Payment, ReturnRequest, nextSequence } from "../models/commerce.js";
 import { Product } from "../models/Product.js";
 import { round2 } from "../models/shared.js";
 import { audit } from "../models/AuditLog.js";
 import { AppError } from "../utils/AppError.js";
 import { logger } from "../utils/logger.js";
+import { inTransaction } from "../utils/transaction.js";
 import { getSection } from "./settingsService.js";
 import { getCart, priceCart } from "./cartService.js";
-import { getRazorpay, toPaise } from "./razorpayService.js";
+import { getRazorpay, paymentMethodDetails, toPaise } from "./razorpayService.js";
 import { orderConfirmationEmail, orderStatusEmail, trySendMail } from "./emailService.js";
 
 /* ---------- Status rules ---------- */
@@ -29,45 +30,52 @@ const ownerKey = ({ userId, guestId }) => (userId ? `u:${userId}` : `g:${guestId
 
 /* ---------- Stock (always inside a transaction) ---------- */
 async function takeStock(items, orderId, session) {
+  const moves = [];
   for (const it of items) {
-    const res = await Product.updateOne(
+    const updated = await Product.findOneAndUpdate(
       { _id: it.product, status: "active", variants: { $elemMatch: { _id: it.variant, status: "active", stock: { $gte: it.qty } } } },
       { $inc: { "variants.$.stock": -it.qty, totalStock: -it.qty, soldCount: it.qty } },
-      { session },
-    );
-    if (!res.modifiedCount) {
+      { session, new: true, projection: { variants: { $elemMatch: { _id: it.variant } } } },
+    ).lean();
+    if (!updated) {
       throw new AppError(409, "OUT_OF_STOCK", `Sorry, ${it.name}${it.size ? ` (${it.size})` : ""} just sold out or has fewer items left. Please review your bag.`, [{ path: String(it.variant), message: "insufficient_stock" }]);
     }
+    const after = updated.variants[0].stock;
+    moves.push({ product: it.product, variant: it.variant, sku: it.sku, delta: -it.qty, before: after + it.qty, after, reason: "order", order: orderId });
   }
-  await InventoryMovement.insertMany(items.map((it) => ({ product: it.product, variant: it.variant, sku: it.sku, delta: -it.qty, reason: "order", order: orderId })), { session });
+  await InventoryMovement.insertMany(moves, { session });
 }
 
-async function returnStock(order, reason, session) {
+/* Puts `qty` units back on a variant (inside a transaction). Returns the movement fields, or null if the
+   product/variant no longer exists. totalStock only counts active variants, so it follows the variant status. */
+export async function restockVariant({ product, variant, qty }, session) {
+  const current = await Product.findOne({ _id: product, "variants._id": variant }, { "variants.$": 1 }).session(session).lean();
+  if (!current || qty <= 0) return null;
+  const v = current.variants[0];
+  await Product.updateOne(
+    { _id: product, "variants._id": variant },
+    { $inc: { "variants.$.stock": qty, soldCount: -qty, ...(v.status === "active" ? { totalStock: qty } : {}) } },
+    { session },
+  );
+  return { before: v.stock, after: v.stock + qty };
+}
+
+/* `alreadyRestocked` (variant id → qty) skips units a return inspection has already put back. */
+async function returnStock(order, reason, session, alreadyRestocked = new Map()) {
+  const moves = [];
   for (const it of order.items) {
+    const qty = it.qty - (alreadyRestocked.get(String(it.variant)) || 0);
     // The product may have been archived or the variant removed since; restock what still exists.
-    await Product.updateOne(
-      { _id: it.product, "variants._id": it.variant },
-      { $inc: { "variants.$[v].stock": it.qty, totalStock: it.qty, soldCount: -it.qty } },
-      { session, arrayFilters: [{ "v._id": it.variant }] },
-    );
+    const res = await restockVariant({ product: it.product, variant: it.variant, qty }, session);
+    if (res) moves.push({ product: it.product, variant: it.variant, sku: it.sku, delta: qty, ...res, reason, order: order._id });
   }
-  await InventoryMovement.insertMany(order.items.map((it) => ({ product: it.product, variant: it.variant, sku: it.sku, delta: it.qty, reason, order: order._id })), { session });
+  if (moves.length) await InventoryMovement.insertMany(moves, { session });
 }
 
 async function releaseCoupon(order, session) {
   if (order.couponCode && order.couponDiscount > 0) await Coupon.updateOne({ code: order.couponCode, usedCount: { $gt: 0 } }, { $inc: { usedCount: -1 } }, { session });
 }
 
-async function inTransaction(fn) {
-  const session = await mongoose.startSession();
-  try {
-    let result;
-    await session.withTransaction(async () => { result = await fn(session); });
-    return result;
-  } finally {
-    await session.endSession();
-  }
-}
 
 /* ---------- Checkout ---------- */
 export async function createOrder({ owner, input, ip }) {
@@ -168,13 +176,23 @@ export async function paymentPayload(order) {
 }
 
 /* ---------- Payment confirmation (from the checkout callback or a webhook; idempotent) ---------- */
-export async function markPaid(order, { providerPaymentId, method, amountPaise, via }) {
+export async function markPaid(order, { providerPaymentId, method, details, amountPaise, via }) {
   if (amountPaise !== toPaise(order.total)) {
     await audit("payment.amount_mismatch", { entity: "Order", entityId: order._id, meta: { expected: toPaise(order.total), got: amountPaise, providerPaymentId } });
     throw new AppError(400, "AMOUNT_MISMATCH", "Payment amount does not match the order.");
   }
-  await Payment.findOneAndUpdate({ order: order._id, provider: "razorpay" }, { $set: { providerPaymentId, status: "captured", method } }, { sort: { createdAt: -1 } });
-  if (order.paymentStatus === "paid") return order;
+  const record = await Payment.findOne({ order: order._id, provider: "razorpay" }).sort({ createdAt: -1 });
+  if (record) {
+    record.providerPaymentId = providerPaymentId;
+    record.method = method;
+    if (details) record.methodDetails = details;
+    record.capturedAt ||= new Date();
+    // A late webhook for an already-refunded payment must not turn it back into "captured".
+    if (!["refunded", "partially_refunded"].includes(record.status)) record.status = "captured";
+    record.errorCode = record.errorDescription = record.errorSource = record.errorStep = record.errorReason = undefined;
+    await record.save();
+  }
+  if (["paid", "refunded", "partially_refunded"].includes(order.paymentStatus)) return order;
 
   const now = new Date();
   if (order.stockReserved) {
@@ -210,8 +228,13 @@ export async function markPaid(order, { providerPaymentId, method, amountPaise, 
   }
 }
 
-export async function recordPaymentFailure(providerOrderId, { providerPaymentId, code, description }) {
-  await Payment.updateOne({ providerOrderId, status: { $in: ["created", "failed"] } }, { $set: { status: "failed", providerPaymentId: providerPaymentId || undefined, errorCode: code, errorDescription: description } });
+/* A failed attempt on a payment that hasn't been captured. Razorpay lets the shopper retry on the same
+   order, so a later success (markPaid) overwrites this. */
+export async function recordPaymentFailure(providerOrderId, { providerPaymentId, code, description, source, step, reason, method, details }) {
+  await Payment.updateOne({ providerOrderId, status: { $in: ["created", "failed"] } }, { $set: {
+    status: "failed", providerPaymentId: providerPaymentId || undefined, errorCode: code, errorDescription: description,
+    errorSource: source, errorStep: step, errorReason: reason, method, ...(details ? { methodDetails: details } : {}),
+  } });
 }
 
 /* ---------- Cancellation ---------- */
@@ -261,7 +284,12 @@ export async function updateStatus(orderId, { status, note, fulfilment, restock 
   }
   if (status === "returned") {
     if (restock) {
-      await inTransaction((session) => returnStock(order, "return", session));
+      // Units a return inspection already put back are not added twice.
+      const restocked = await ReturnRequest.aggregate([
+        { $match: { order: order._id } }, { $unwind: "$items" },
+        { $group: { _id: "$items.variant", qty: { $sum: "$items.restockedQty" } } },
+      ]);
+      await inTransaction((session) => returnStock(order, "return", session, new Map(restocked.map((r) => [String(r._id), r.qty]))));
       order.stockReserved = false;
     }
     if (order.paymentStatus === "paid") order.refundRequired = true;
@@ -278,48 +306,136 @@ export async function updateStatus(orderId, { status, note, fulfilment, restock 
 }
 
 /* ---------- Refunds (admins only) ---------- */
-export async function refundOrder(orderId, { amount, reason, manualReference }, actor) {
-  const order = await Order.findById(orderId);
-  if (!order) throw AppError.notFound("Order not found.");
-  if (!["paid", "partially_refunded"].includes(order.paymentStatus)) throw new AppError(409, "NOT_REFUNDABLE", "Only paid orders can be refunded.");
-  const refundable = round2(order.total - order.refundedAmount);
-  const value = round2(amount ?? refundable);
-  if (value <= 0 || value > refundable) throw AppError.badRequest(`Refund must be between ₹0.01 and ₹${refundable}.`);
+const REFUND_LOCK_MS = 2 * 60_000;
 
-  const payment = await Payment.findOne({ order: order._id, status: { $in: ["captured", "partially_refunded"] } }).sort({ createdAt: -1 });
-  let refundId, refundStatus;
-  if (order.paymentMethod === "razorpay") {
-    if (!payment?.providerPaymentId) throw new AppError(409, "NOT_REFUNDABLE", "No captured online payment found for this order.");
-    try {
-      const r = await getRazorpay().refund(payment.providerPaymentId, { amount: toPaise(value), notes: { orderNumber: order.orderNumber, reason: reason || "" } });
-      refundId = r.id;
-      refundStatus = r.status;
-    } catch (err) {
-      logger.error({ err: err?.message ?? err?.error?.description, orderNumber: order.orderNumber }, "Razorpay refund failed");
-      throw new AppError(502, "REFUND_FAILED", `Razorpay rejected the refund: ${err?.error?.description || "please try again"}.`);
+/* Issues a refund through Razorpay (or records a manual COD refund). One refund per order at a time:
+   the order is locked while the gateway call is in flight, so a double click or two admins can't both
+   refund the same balance. Amounts are always checked against what the database says is refundable. */
+export async function issueRefund(orderId, { amount, reason, manualReference, returnRequest }, actor) {
+  const now = new Date();
+  const order = await Order.findOneAndUpdate(
+    { _id: orderId, $or: [{ refundLockedAt: null }, { refundLockedAt: { $lt: new Date(now.getTime() - REFUND_LOCK_MS) } }] },
+    { $set: { refundLockedAt: now } }, { new: true },
+  );
+  if (!order) {
+    if (await Order.exists({ _id: orderId })) throw new AppError(409, "REFUND_IN_PROGRESS", "A refund for this order is already being processed. Refresh in a moment.");
+    throw AppError.notFound("Order not found.");
+  }
+  try {
+    if (!["paid", "partially_refunded"].includes(order.paymentStatus)) throw new AppError(409, "NOT_REFUNDABLE", "Only paid orders can be refunded.");
+    const refundable = round2(order.total - order.refundedAmount);
+    const value = round2(amount ?? refundable);
+    if (value <= 0 || value > refundable) throw AppError.badRequest(`Refund must be between ₹0.01 and ₹${refundable}.`);
+
+    const payment = await Payment.findOne({ order: order._id, status: { $in: ["captured", "partially_refunded"] } }).sort({ createdAt: -1 });
+    let refundId, refundStatus;
+    if (order.paymentMethod === "razorpay") {
+      if (!payment?.providerPaymentId) throw new AppError(409, "NOT_REFUNDABLE", "No captured online payment found for this order.");
+      const gateway = getRazorpay(); // PAYMENTS_NOT_CONFIGURED surfaces as itself, not as a rejected refund
+      try {
+        const r = await gateway.refund(payment.providerPaymentId, {
+          amount: toPaise(value),
+          notes: { orderNumber: order.orderNumber, reason: reason || "", ...(returnRequest ? { returnRequest: String(returnRequest) } : {}) },
+        });
+        refundId = r.id;
+        refundStatus = r.status || "pending";
+      } catch (err) {
+        logger.error({ err: err?.message ?? err?.error?.description, orderNumber: order.orderNumber }, "Razorpay refund failed");
+        throw new AppError(502, "REFUND_FAILED", `Razorpay rejected the refund: ${err?.error?.description || "please try again"}.`);
+      }
+    } else {
+      if (!manualReference) throw AppError.badRequest("Cash on delivery refunds are paid outside the system; enter the bank/UPI reference.");
+      if (payment?.refunds.some((r) => r.refundId === manualReference)) throw AppError.conflict("This refund reference has already been recorded.");
+      refundId = manualReference;
+      refundStatus = "processed";
     }
-  } else {
-    if (!manualReference) throw AppError.badRequest("Cash on delivery refunds are paid outside the system; enter the bank/UPI reference.");
-    refundId = manualReference;
-    refundStatus = "processed";
-  }
 
-  const refundedAmount = round2(order.refundedAmount + value);
-  const full = refundedAmount >= order.total;
-  order.refundedAmount = refundedAmount;
-  order.paymentStatus = full ? "refunded" : "partially_refunded";
-  order.refundRequired = !full && order.refundRequired;
-  order.needsAttention = full ? null : order.needsAttention;
-  order.history.push({ status: order.status, note: `Refund ₹${value} (${refundId})${reason ? `: ${reason}` : ""}`, by: actor._id, at: new Date() });
-  await order.save();
-  if (payment) {
-    payment.refunds.push({ refundId, amount: value, status: refundStatus, by: actor._id });
-    payment.refundedAmount = round2(payment.refundedAmount + value);
-    payment.status = full ? "refunded" : "partially_refunded";
-    await payment.save();
+    const refundedAmount = round2(order.refundedAmount + value);
+    const full = refundedAmount >= order.total;
+    order.refundedAmount = refundedAmount;
+    order.paymentStatus = full ? "refunded" : "partially_refunded";
+    order.refundRequired = !full && order.refundRequired;
+    order.needsAttention = full ? null : order.needsAttention;
+    order.refundLockedAt = null;
+    order.history.push({ status: order.status, note: `Refund ₹${value} (${refundId}, ${refundStatus})${reason ? `: ${reason}` : ""}`, by: actor._id, at: new Date() });
+    await order.save();
+    if (payment) {
+      payment.refunds.push({
+        refundId, amount: value, status: refundStatus, by: actor._id, reason, returnRequest,
+        manual: order.paymentMethod !== "razorpay", processedAt: refundStatus === "processed" ? new Date() : undefined,
+      });
+      payment.refundedAmount = round2(payment.refundedAmount + value);
+      payment.status = full ? "refunded" : "partially_refunded";
+      await payment.save();
+    }
+    await audit("order.refunded", { actor: actor._id, entity: "Order", entityId: order._id, meta: { orderNumber: order.orderNumber, amount: value, refundId, status: refundStatus, returnRequest: returnRequest && String(returnRequest) } });
+    return { order, refund: { refundId, amount: value, status: refundStatus, payment: payment?._id, providerPaymentId: payment?.providerPaymentId } };
+  } finally {
+    // Released on every path (the success path already cleared it on the saved order).
+    await Order.updateOne({ _id: order._id, refundLockedAt: now }, { $set: { refundLockedAt: null } });
   }
-  await audit("order.refunded", { actor: actor._id, entity: "Order", entityId: order._id, meta: { orderNumber: order.orderNumber, amount: value, refundId } });
-  return order;
+}
+
+export const refundOrder = async (orderId, input, actor) => (await issueRefund(orderId, input, actor)).order;
+
+/* Applies a refund status that came from Razorpay (webhook or an explicit fetch). Idempotent.
+   A failed refund gives the money back to the order's refundable balance and flags the order. */
+export async function applyRefundStatus({ refundId, status, failureReason, via }) {
+  if (!refundId || !status) return null;
+  const payment = await Payment.findOne({ "refunds.refundId": refundId });
+  if (!payment) return null;
+  const entry = payment.refunds.find((r) => r.refundId === refundId);
+  if (entry.status === status || entry.status === "failed") return { payment, entry, changed: false }; // unchanged or already final
+  const now = new Date();
+  entry.status = status;
+  if (status === "processed") entry.processedAt ||= now;
+  if (status === "failed") {
+    entry.failedAt = now;
+    entry.failureReason = failureReason || "Refund failed at the gateway";
+    payment.refundedAmount = round2(Math.max(0, payment.refundedAmount - entry.amount));
+    payment.status = payment.refundedAmount > 0 ? "partially_refunded" : "captured";
+    const order = await Order.findById(payment.order);
+    if (order) {
+      order.refundedAmount = round2(Math.max(0, order.refundedAmount - entry.amount));
+      order.paymentStatus = order.refundedAmount > 0 ? "partially_refunded" : "paid";
+      order.refundRequired = true;
+      order.needsAttention = `Refund ${refundId} of ₹${entry.amount} failed${failureReason ? `: ${failureReason}` : ""}. Retry the refund.`;
+      order.history.push({ status: order.status, note: `Refund ${refundId} failed (${via})`, at: now });
+      await order.save();
+    }
+  }
+  await payment.save();
+  // A refund made for a return request carries its status over.
+  const returnStatus = { processed: "completed", failed: "failed", pending: "processing" }[status];
+  if (returnStatus) {
+    await ReturnRequest.updateOne({ "refund.refundId": refundId, "refund.status": { $ne: returnStatus } }, {
+      $set: {
+        "refund.status": returnStatus,
+        ...(status === "processed" ? { "refund.completedAt": now } : {}),
+        ...(status === "failed" ? { "refund.failedAt": now, "refund.failureReason": entry.failureReason } : {}),
+      },
+      $push: { history: { refundStatus: returnStatus, note: `Refund ${refundId} ${status} (${via})`, at: now } },
+    });
+  }
+  await audit("refund.status_changed", { entity: "Payment", entityId: payment._id, meta: { refundId, status, via } });
+  return { payment, entry, changed: true };
+}
+
+/* Asks Razorpay for a refund's current status (for when a webhook was missed). */
+export async function syncRefund(paymentId, refundId) {
+  const payment = await Payment.findById(paymentId);
+  const entry = payment?.refunds.find((r) => r.refundId === refundId);
+  if (!entry) throw AppError.notFound("Refund not found.");
+  if (entry.manual || payment.provider !== "razorpay") return { status: entry.status, changed: false };
+  let r;
+  try {
+    r = await getRazorpay().fetchRefund(payment.providerPaymentId, refundId);
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    throw new AppError(502, "GATEWAY_ERROR", `Couldn't reach Razorpay: ${err?.error?.description || "please try again"}.`);
+  }
+  const result = await applyRefundStatus({ refundId, status: r.status, failureReason: r.error_description || r.notes?.failure_reason, via: "sync" });
+  return { status: r.status, changed: Boolean(result?.changed) };
 }
 
 /* ---------- Reservation expiry (background job) ---------- */
@@ -339,7 +455,7 @@ export async function expireReservations(now = new Date()) {
           if (err?.code !== "PAYMENTS_NOT_CONFIGURED") throw err;
         }
         const captured = payments.find((x) => x.status === "captured");
-        if (captured) { await markPaid(order, { providerPaymentId: captured.id, method: captured.method, amountPaise: captured.amount, via: "reconciliation" }); continue; }
+        if (captured) { await markPaid(order, { providerPaymentId: captured.id, method: captured.method, details: paymentMethodDetails(captured), amountPaise: captured.amount, via: "reconciliation" }); continue; }
       }
       await cancelOrder(order._id, { reason: "Payment not completed in time", system: true });
       released++;
