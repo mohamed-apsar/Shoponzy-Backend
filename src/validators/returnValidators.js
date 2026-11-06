@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { objectId, pagination } from "./common.js";
-import { ITEM_CONDITIONS, RETURN_REASONS, RETURN_REFUND_STATUSES, RETURN_STATUSES } from "../models/commerce.js";
+import { ITEM_CONDITIONS, RETURN_REASON_CODE, RETURN_REFUND_STATUSES, RETURN_STATUSES } from "../models/commerce.js";
 import { dateRange } from "./inventoryValidators.js";
 
 const note = z.string().trim().max(1000);
@@ -8,14 +8,20 @@ const note = z.string().trim().max(1000);
 /* ---------- Customer ---------- */
 export const createReturnSchema = z.object({
   items: z.array(z.object({ variantId: objectId, qty: z.number().int().min(1).max(100) }).strict()).min(1, "Choose at least one item to return.").max(50),
-  reason: z.enum(RETURN_REASONS, { errorMap: () => ({ message: "Choose a return reason." }) }),
+  // Checked against the store's active reasons in the service (they are admin-configurable).
+  reason: z.string({ required_error: "Choose a return reason." }).trim().regex(RETURN_REASON_CODE, "Choose a return reason."),
   comments: z.string().trim().max(1000).optional(),
   evidence: z.array(z.object({ publicId: z.string().trim().min(1).max(300) }).passthrough()).max(5, "Attach at most 5 photos.").optional(),
-}).strict().superRefine((v, ctx) => {
-  if (v.reason === "other" && !(v.comments && v.comments.length >= 5)) {
-    ctx.addIssue({ code: "custom", path: ["comments"], message: "Tell us a little about the reason for the return." });
-  }
-});
+}).strict();
+
+export const returnReasonsSchema = z.object({
+  reasons: z.array(z.object({
+    code: z.string().trim().regex(RETURN_REASON_CODE, "Codes use 2–40 lowercase letters, numbers or _.").optional(),
+    label: z.string().trim().min(2, "Each reason needs a name.").max(80),
+    active: z.boolean().default(true),
+    requiresComment: z.boolean().default(false),
+  }).strict()).min(1).max(30),
+}).strict();
 
 /* ---------- Admin ---------- */
 export const adminReturnsQuery = z.object({
@@ -23,6 +29,7 @@ export const adminReturnsQuery = z.object({
   q: z.string().trim().max(100).optional(),
   status: z.enum(RETURN_STATUSES).optional(),
   refundStatus: z.enum(RETURN_REFUND_STATUSES).optional(),
+  reason: z.string().trim().regex(RETURN_REASON_CODE).optional(),
   view: z.enum(["open", "approved", "refunds"]).optional(),
   sort: z.enum(["newest", "oldest", "updated"]).default("newest"),
   ...dateRange,

@@ -40,6 +40,10 @@ describe("transactions & payments", () => {
 
     const res = (await admin.get("/admin/transactions").expect(200)).body;
     expect(res.meta.summary).toMatchObject({ totalTransactions: 4, successful: 2, failed: 1, pending: 1, totalAmount: 1900, totalRefunded: 0 });
+    const byMethod = Object.fromEntries(res.meta.summary.byMethod.map((m) => [m.method, m]));
+    expect(byMethod.card).toMatchObject({ total: 1, successful: 1, failed: 0, successRate: 100, amount: 950 });
+    expect(byMethod.netbanking).toMatchObject({ total: 1, successful: 0, failed: 1, successRate: 0, amount: 0 });
+    expect(byMethod.unknown).toMatchObject({ total: 1, successRate: null });
 
     const cardRow = res.data.find((t) => t.razorpayPaymentId === card.pay.id);
     expect(cardRow).toMatchObject({ status: "success", method: "card", amount: 950, customer: { name: "Card Buyer", email: "card@example.com" }, order: { orderNumber: card.order.orderNumber } });

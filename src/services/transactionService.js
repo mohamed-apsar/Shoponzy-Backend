@@ -94,11 +94,24 @@ export async function getTransaction(id) {
    cards always show the full success / failed / pending split). */
 export async function transactionSummary(query) {
   const filter = await transactionFilter(query, { withStatus: false });
-  const [byStatus, refunds] = await Promise.all([
+  const [byStatus, refunds, methods] = await Promise.all([
     Payment.aggregate([{ $match: filter }, { $group: { _id: "$status", n: { $sum: 1 }, amount: { $sum: "$amount" } } }]),
     Payment.aggregate([
       { $match: filter }, { $unwind: "$refunds" },
       { $group: { _id: "$refunds.status", n: { $sum: 1 }, amount: { $sum: "$refunds.amount" } } },
+    ]),
+    // Per payment method (COD counted as its own method; attempts with no method yet are "unknown").
+    Payment.aggregate([
+      { $match: filter },
+      { $group: {
+        _id: { $cond: [{ $eq: ["$provider", "cod"] }, "cod", { $ifNull: ["$method", "unknown"] }] },
+        total: { $sum: 1 },
+        successful: { $sum: { $cond: [{ $in: ["$status", RECEIVED] }, 1, 0] } },
+        failed: { $sum: { $cond: [{ $eq: ["$status", "failed"] }, 1, 0] } },
+        amount: { $sum: { $cond: [{ $in: ["$status", RECEIVED] }, "$amount", 0] } },
+        refunded: { $sum: "$refundedAmount" },
+      } },
+      { $sort: { amount: -1, total: -1 } },
     ]),
   ]);
   const count = (statuses) => byStatus.filter((s) => statuses.includes(s._id)).reduce((t, s) => t + s.n, 0);
@@ -115,6 +128,11 @@ export async function transactionSummary(query) {
     totalRefunded: round2(refund("processed").amount),
     refundsPending: { count: refund("pending").n, amount: round2(refund("pending").amount) },
     refundsFailed: { count: refund("failed").n, amount: round2(refund("failed").amount) },
+    byMethod: methods.map((m) => ({
+      method: m._id, total: m.total, successful: m.successful, failed: m.failed,
+      successRate: m.successful + m.failed ? Math.round((m.successful / (m.successful + m.failed)) * 100) : null,
+      amount: round2(m.amount), refunded: round2(m.refunded),
+    })),
   };
 }
 

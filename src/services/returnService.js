@@ -5,7 +5,7 @@ import { audit } from "../models/AuditLog.js";
 import { AppError } from "../utils/AppError.js";
 import { inTransaction } from "../utils/transaction.js";
 import { escapeRegex } from "../validators/common.js";
-import { getSection } from "./settingsService.js";
+import { getSection, updateSection } from "./settingsService.js";
 import { issueRefund, restockVariant, updateStatus as updateOrderStatus } from "./orderService.js";
 
 /* Return workflow
@@ -31,6 +31,51 @@ export const STATUS_FLOW = {
 export const MANUAL_STATUSES = ["pickup_scheduled", "in_transit", "received", "completed", "cancelled"];
 const PAID = ["paid", "partially_refunded"];
 
+/* ---------- Return reasons (admin-configurable) ---------- */
+export async function getReturnReasons() {
+  return (await getSection("returns")).reasons;
+}
+const reasonLabelOf = (reasons, code) => reasons.find((r) => r.code === code)?.label || code.replace(/_/g, " ");
+const slugCode = (label) => label.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+
+/* Replaces the reason list. New reasons get a code from their label; a reason already used by a return
+   request can be renamed or disabled, but not removed (its requests would lose their reason). */
+export async function updateReturnReasons(input, actor) {
+  const current = await getReturnReasons();
+  const seen = new Set();
+  const taken = new Set([...current.map((c) => c.code), ...input.map((r) => r.code).filter(Boolean)]);
+  const reasons = input.map((r) => {
+    let code = r.code;
+    if (!code) {
+      // New reason: a fresh code that never reuses an existing one (that would relabel old requests).
+      const base = slugCode(r.label).padEnd(2, "_") || "reason";
+      code = base;
+      for (let n = 2; taken.has(code); n++) code = `${base.slice(0, 36)}_${n}`;
+      taken.add(code);
+    }
+    if (seen.has(code)) throw AppError.badRequest(`Two reasons share the code "${code}".`);
+    seen.add(code);
+    return { code, label: r.label, active: r.active, requiresComment: r.requiresComment };
+  });
+  const labels = reasons.map((r) => r.label.toLowerCase());
+  if (new Set(labels).size !== labels.length) throw AppError.badRequest("Two reasons have the same name.");
+  if (!reasons.some((r) => r.active)) throw AppError.badRequest("Keep at least one reason active so customers can request returns.");
+  const removed = current.filter((c) => !seen.has(c.code)).map((c) => c.code);
+  if (removed.length) {
+    const used = await ReturnRequest.distinct("reason", { reason: { $in: removed } });
+    if (used.length) throw AppError.conflict(`"${reasonLabelOf(current, used[0])}" is used by existing return requests. Disable it instead of deleting it.`);
+  }
+  await updateSection("returns", { reasons });
+  await audit("returns.reasons_updated", { actor: actor._id, entity: "SiteSetting", entityId: "returns", meta: { codes: reasons.map((r) => r.code), removed } });
+  return reasons;
+}
+
+/* Per-reason counts for the admin list of reasons. */
+export async function reasonUsage() {
+  const rows = await ReturnRequest.aggregate([{ $group: { _id: "$reason", n: { $sum: 1 } } }]);
+  return Object.fromEntries(rows.map((r) => [r._id, r.n]));
+}
+
 const deliveredAt = (order) => order.fulfilment?.deliveredAt
   || [...(order.history || [])].reverse().find((h) => h.status === "delivered")?.at || null;
 
@@ -53,7 +98,8 @@ export async function returnEligibility(order) {
   else if (!returnDays) reason = "This store doesn't accept online return requests. Please contact us.";
   else if (until && until < new Date()) reason = `The ${returnDays}-day return window for this order has ended.`;
   else if (!items.some((i) => i.returnable > 0)) reason = "All items from this order are already in a return request.";
-  return { eligible: !reason, reason, returnDays, returnBy: until, items };
+  const reasons = (await getReturnReasons()).filter((r) => r.active).map(({ code, label, requiresComment }) => ({ code, label, requiresComment }));
+  return { eligible: !reason, reason, returnDays, returnBy: until, items, reasons };
 }
 
 /* The most that may be refunded for these items: what was paid for them, i.e. their line value minus a
@@ -72,6 +118,11 @@ const push = (rr, entry) => rr.history.push({ at: new Date(), ...entry });
 export async function createReturn({ order, owner, input, ip }) {
   const eligibility = await returnEligibility(order);
   if (!eligibility.eligible) throw new AppError(409, "RETURN_NOT_ALLOWED", eligibility.reason);
+  const chosen = eligibility.reasons.find((r) => r.code === input.reason);
+  if (!chosen) throw AppError.badRequest("Choose a return reason.", [{ path: "reason", message: "Choose a return reason." }]);
+  if (chosen.requiresComment && (input.comments || "").trim().length < 5) {
+    throw AppError.badRequest("Tell us a little about the reason for the return.", [{ path: "comments", message: "Tell us a little about the reason for the return." }]);
+  }
   const byVariant = new Map(eligibility.items.map((i) => [i.variant, i]));
   const seen = new Set();
   const items = input.items.map(({ variantId, qty }) => {
@@ -97,7 +148,7 @@ export async function createReturn({ order, owner, input, ip }) {
     returnNumber: `RT${100000 + seq}`, order: order._id, orderNumber: order.orderNumber,
     user: order.user || undefined, guestId: order.guestId || undefined,
     contact: { name: order.contact.name, email: order.contact.email, phone: order.contact.phone },
-    items, reason: input.reason, comments: input.comments || "", evidence,
+    items, reason: chosen.code, reasonLabel: chosen.label, comments: input.comments || "", evidence,
     history: [{ status: "requested", note: "Return requested by customer", by: owner.userId || undefined, at: new Date() }],
   });
   await Order.updateOne({ _id: order._id }, { $push: { history: { status: order.status, note: `Return ${rr.returnNumber} requested`, at: new Date() } } });
@@ -119,7 +170,7 @@ export async function cancelByCustomer(rr, owner) {
 export function customerReturnView(r) {
   const o = typeof r.toJSON === "function" ? r.toJSON() : r;
   return {
-    id: o.id || String(o._id), returnNumber: o.returnNumber, orderNumber: o.orderNumber, status: o.status, reason: o.reason, comments: o.comments,
+    id: o.id || String(o._id), returnNumber: o.returnNumber, orderNumber: o.orderNumber, status: o.status, reason: o.reason, reasonLabel: o.reasonLabel || o.reason, comments: o.comments,
     items: o.items.map(({ name, sku, image, color, size, qty, price }) => ({ name, sku, image, color, size, qty, price })),
     evidence: (o.evidence || []).map((e) => ({ url: e.url })),
     rejectionReason: o.status === "rejected" ? o.rejectionReason : "",
@@ -295,8 +346,9 @@ export async function refund(id, { amount, manualReference, note }, actor) {
 }
 
 /* ---------- Listing ---------- */
-export async function returnFilter({ q, status, refundStatus, from, to, view }) {
+export async function returnFilter({ q, status, refundStatus, reason, from, to, view }) {
   const filter = {};
+  if (reason) filter.reason = reason;
   if (status) filter.status = status;
   if (view === "approved") filter.status = { $in: ["approved", "pickup_scheduled", "in_transit", "received", "inspected", "completed"] };
   if (view === "open") filter.status = { $in: ["requested", "approved", "pickup_scheduled", "in_transit", "received", "inspected"] };
@@ -325,7 +377,7 @@ export function adminListView(r) {
   return {
     id: String(r._id), returnNumber: r.returnNumber, orderId: String(r.order), orderNumber: r.orderNumber,
     customer: r.contact, items: r.items.map(({ name, sku, image, color, size, qty, price, condition, restockedQty }) => ({ name, sku, image, color, size, qty, price, condition, restockedQty })),
-    quantity: r.items.reduce((s, i) => s + i.qty, 0), reason: r.reason, comments: r.comments,
+    quantity: r.items.reduce((s, i) => s + i.qty, 0), reason: r.reason, reasonLabel: r.reasonLabel || r.reason.replace(/_/g, " "), comments: r.comments,
     status: r.status, refund: { status: r.refund?.status || "not_applicable", amount: r.refund?.amount ?? null, refundId: r.refund?.refundId || null },
     evidenceCount: (r.evidence || []).length,
     createdAt: r.createdAt, decidedAt: r.decidedAt || null, receivedAt: r.receivedAt || null, inspectedAt: r.inspectedAt || null, completedAt: r.completedAt || null,

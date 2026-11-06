@@ -26,3 +26,15 @@ export const reject = act(returns.reject);
 export const setStatus = act(returns.setStatus);
 export const inspect = act(returns.inspect);
 export const refund = act(returns.refund);
+
+/* Return reasons offered to customers (admin-managed). */
+export async function getReasons(_req, res) {
+  const [reasons, usage] = await Promise.all([returns.getReturnReasons(), returns.reasonUsage()]);
+  ok(res, reasons.map((r) => ({ ...r, used: usage[r.code] || 0 })));
+}
+
+export async function updateReasons(req, res) {
+  const reasons = await returns.updateReturnReasons(req.valid.body.reasons, req.auth.user);
+  const usage = await returns.reasonUsage();
+  ok(res, reasons.map((r) => ({ ...r, used: usage[r.code] || 0 })));
+}

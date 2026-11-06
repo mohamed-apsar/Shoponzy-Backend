@@ -1,5 +1,6 @@
 import { env } from "../config/env.js";
 import { SiteSetting } from "../models/site.js";
+import { DEFAULT_RETURN_REASONS } from "../models/commerce.js";
 import { SECTIONS } from "../validators/siteValidators.js";
 
 /* Defaults = what the live storefront shows today, so an unconfigured site looks unchanged. */
@@ -48,6 +49,8 @@ export const DEFAULT_SETTINGS = {
     deliveryText: "Usually delivered in 3–7 working days", returnDays: 7,
   },
   inventory: { lowStockThreshold: env.LOW_STOCK_THRESHOLD },
+  // Admin-only and not a Manage Site section: edited through /admin/returns/reasons (which guards reasons in use).
+  returns: { reasons: DEFAULT_RETURN_REASONS },
 };
 
 export async function getSection(section) {

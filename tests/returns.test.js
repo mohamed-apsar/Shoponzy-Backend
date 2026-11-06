@@ -112,6 +112,43 @@ describe("customer return requests", () => {
   });
 });
 
+describe("return reasons", () => {
+  it("admins add, rename and disable reasons; customers see and use the active ones", async () => {
+    const { b, order, walletVariant } = await deliveredOrder();
+    const initial = (await admin.get("/admin/returns/reasons").expect(200)).body.data;
+    expect(initial.map((r) => r.code)).toEqual(["damaged", "wrong_item", "defective", "size_fit", "not_as_described", "missing_items", "changed_mind", "other"]);
+
+    const next = initial.map((r) => (r.code === "changed_mind" ? { ...r, active: false } : r.code === "damaged" ? { ...r, label: "Arrived damaged" } : r));
+    const saved = (await admin.put("/admin/returns/reasons", { reasons: [...next.map(({ used: _u, ...r }) => r), { label: "Colour differs from photos", requiresComment: true }] }).expect(200)).body.data;
+    const added = saved.find((r) => r.label === "Colour differs from photos");
+    expect(added).toMatchObject({ code: "colour_differs_from_photos", active: true, requiresComment: true, used: 0 });
+
+    const offered = (await b.get(`/orders/${order.orderNumber}/returns`).expect(200)).body.data.eligibility.reasons;
+    expect(offered.map((r) => r.code)).not.toContain("changed_mind");
+    expect(offered.find((r) => r.code === "damaged").label).toBe("Arrived damaged");
+    await requestReturn(b, order, { items: [{ variantId: String(walletVariant._id), qty: 1 }], reason: "changed_mind" }).expect(400); // disabled
+    await requestReturn(b, order, { items: [{ variantId: String(walletVariant._id), qty: 1 }], reason: added.code }).expect(400); // needs a comment
+    const rr = (await requestReturn(b, order, { items: [{ variantId: String(walletVariant._id), qty: 1 }], reason: added.code, comments: "Looks blue, not black" }).expect(201)).body.data;
+    expect(rr.reasonLabel).toBe("Colour differs from photos");
+
+    // A reason in use can be renamed (old requests keep their label) or disabled, but not deleted.
+    const withRename = saved.map(({ used: _u, ...r }) => (r.code === added.code ? { ...r, label: "Colour mismatch" } : r));
+    await admin.put("/admin/returns/reasons", { reasons: withRename }).expect(200);
+    expect((await admin.get(`/admin/returns/${rr.id}`).expect(200)).body.data.reasonLabel).toBe("Colour differs from photos");
+    expect((await admin.put("/admin/returns/reasons", { reasons: withRename.filter((r) => r.code !== added.code) }).expect(409)).body.error.message).toMatch(/Disable it instead/);
+    expect((await admin.get(`/admin/returns?reason=${added.code}`).expect(200)).body.meta.total).toBe(1);
+    expect((await admin.get("/admin/returns/reasons").expect(200)).body.data.find((r) => r.code === added.code).used).toBe(1);
+
+    // Guard rails.
+    await admin.put("/admin/returns/reasons", { reasons: withRename.map((r) => ({ ...r, active: false })) }).expect(400);
+    await admin.put("/admin/returns/reasons", { reasons: [...withRename, { label: "Colour mismatch" }] }).expect(400); // duplicate name
+    await admin.put("/admin/returns/reasons", { reasons: [] }).expect(400);
+    // Reasons are admin-only: not in the public settings.
+    expect((await (await browser()).get("/site-settings").expect(200)).body.data.returns).toBeUndefined();
+    await (await customerBrowser()).put("/admin/returns/reasons", { reasons: withRename }).expect(401);
+  });
+});
+
 describe("admin return workflow", () => {
   it("approve → receive → inspect (restock) → refund (COD manual) → complete", async () => {
     const { b, order, walletVariant, shoeVariant } = await deliveredOrder();

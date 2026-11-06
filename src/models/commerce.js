@@ -167,7 +167,19 @@ export const Payment = mongoose.model("Payment", paymentSchema);
 /* ---------- Return requests (customer-initiated, admin-reviewed) ---------- */
 export const RETURN_STATUSES = ["requested", "approved", "rejected", "pickup_scheduled", "in_transit", "received", "inspected", "completed", "cancelled"];
 export const RETURN_REFUND_STATUSES = ["not_applicable", "pending", "processing", "completed", "failed"];
-export const RETURN_REASONS = ["damaged", "wrong_item", "defective", "size_fit", "not_as_described", "missing_items", "changed_mind", "other"];
+/* Default return reasons. Admins can add, rename and disable reasons (settings key "returns"); each request
+   stores the reason code and the label shown at the time. */
+export const DEFAULT_RETURN_REASONS = [
+  { code: "damaged", label: "Damaged product", active: true, requiresComment: false },
+  { code: "wrong_item", label: "Wrong product delivered", active: true, requiresComment: false },
+  { code: "defective", label: "Defective product", active: true, requiresComment: false },
+  { code: "size_fit", label: "Size or fit issue", active: true, requiresComment: false },
+  { code: "not_as_described", label: "Product not as described", active: true, requiresComment: false },
+  { code: "missing_items", label: "Missing items", active: true, requiresComment: false },
+  { code: "changed_mind", label: "Changed mind", active: true, requiresComment: false },
+  { code: "other", label: "Other", active: true, requiresComment: true },
+];
+export const RETURN_REASON_CODE = /^[a-z0-9_]{2,40}$/;
 export const ITEM_CONDITIONS = ["good", "opened", "damaged", "unsellable"];
 
 const returnItemSchema = new mongoose.Schema({
@@ -188,7 +200,8 @@ const returnRequestSchema = new mongoose.Schema({
   guestId: String,
   contact: { name: String, email: String, phone: String },
   items: { type: [returnItemSchema], validate: [(v) => v.length > 0, "Choose at least one item to return."] },
-  reason: { type: String, enum: RETURN_REASONS, required: true },
+  reason: { type: String, required: true, match: RETURN_REASON_CODE, index: true },
+  reasonLabel: { type: String, maxlength: 80 },
   comments: { type: String, maxlength: 1000, default: "" },
   evidence: { type: [imageSchema], default: [] },
   status: { type: String, enum: RETURN_STATUSES, default: "requested", index: true },
