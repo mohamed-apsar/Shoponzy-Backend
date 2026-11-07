@@ -10,10 +10,12 @@ import * as orders from "../controllers/admin/ordersAdmin.js";
 import * as site from "../controllers/admin/siteAdmin.js";
 import * as inventory from "../controllers/admin/inventoryAdmin.js";
 import * as returnsAdmin from "../controllers/admin/returnsAdmin.js";
+import * as engagement from "../controllers/admin/engagementAdmin.js";
+import { campaignListQuery, createCampaignSchema, createFaqSchema, emailLogQuery, faqListQuery, notificationSettingsSchema, reorderIdsSchema, supportListQuery, supportNoteSchema, supportReplySchema, supportStatusSchema, testSendSchema, updateCampaignSchema, updateFaqSchema } from "../validators/engagementValidators.js";
 import { adminReturnsQuery, approveReturnSchema, inspectReturnSchema, rejectReturnSchema, returnReasonsSchema, returnRefundSchema, returnStatusSchema, returnSummaryQuery } from "../validators/returnValidators.js";
 import { crud } from "../controllers/admin/crud.js";
 import { Coupon } from "../models/commerce.js";
-import { Banner, ContactMessage, HomepageSection, Page, Popup } from "../models/site.js";
+import { Banner, HomepageSection, Page, Popup } from "../models/site.js";
 import { MAX_UPLOAD_BYTES } from "../services/uploadService.js";
 import { listUsersQuery } from "../validators/userValidators.js";
 import { inventoryQuery, inventorySettingsSchema, movementsQuery, productThresholdSchema } from "../validators/inventoryValidators.js";
@@ -21,7 +23,7 @@ import { userStatusSchema } from "../validators/accountValidators.js";
 import { objectId } from "../validators/common.js";
 import { adminProductsQuery, bulkProductsSchema, createCategorySchema, createProductSchema, listCategoriesQuery, stockAdjustSchema, updateCategorySchema, updateProductSchema } from "../validators/catalogValidators.js";
 import { adminOrdersQuery, cancelSchema, createCouponSchema, listQuery, refundSchema, refundsQuery, transactionsQuery, updateCouponSchema, updateFulfilmentSchema, updateOrderStatusSchema } from "../validators/commerceValidators.js";
-import { contactStatusSchema, createBannerSchema, createPageSchema, createPopupSchema, createSectionSchema, notFoundRedirectSchema, reorderSchema, updateBannerSchema, updatePageSchema, updatePopupSchema, updateSectionSchema } from "../validators/contentValidators.js";
+import { createBannerSchema, createPageSchema, createPopupSchema, createSectionSchema, notFoundRedirectSchema, reorderSchema, updateBannerSchema, updatePageSchema, updatePopupSchema, updateSectionSchema } from "../validators/contentValidators.js";
 import { authRouter } from "./authRoutes.js";
 
 const router = Router();
@@ -134,10 +136,41 @@ resource("/pages", crud(Page, { entity: "Page", searchFields: ["title", "slug"],
 router.post("/uploads", upload.single("file"), site.upload);
 router.delete("/uploads/*publicId", (req, _res, next) => { req.params.publicId = [].concat(req.params.publicId).join("/"); next(); }, site.discardUpload);
 
-/* Messages, newsletter, audit */
-const messages = crud(ContactMessage, { entity: "ContactMessage", searchFields: ["name", "phone", "email", "message", "orderNumber"] });
-router.get("/contact-messages", validate({ query: listQuery }), messages.list);
-router.patch("/contact-messages/:id", id, validate({ body: contactStatusSchema }), messages.update);
+/* FAQ Management */
+router.get("/faqs", validate({ query: faqListQuery }), engagement.listFaqs);
+router.get("/faqs/export.csv", engagement.exportFaqs);
+router.post("/faqs", validate({ body: createFaqSchema }), engagement.createFaq);
+router.post("/faqs/import-defaults", engagement.importDefaultFaqs);
+router.put("/faqs/order", validate({ body: reorderIdsSchema }), engagement.reorderFaqs);
+router.patch("/faqs/:id", id, validate({ body: updateFaqSchema }), engagement.updateFaq);
+router.delete("/faqs/:id", id, engagement.deleteFaq);
+
+/* Notifications (promotional emails to newsletter subscribers + order/return email switches) */
+router.get("/notifications/summary", engagement.notificationSummary);
+router.get("/notifications/settings", engagement.getNotificationSettings);
+router.put("/notifications/settings", validate({ body: notificationSettingsSchema }), engagement.updateNotificationSettings);
+router.get("/notifications/email-log", validate({ query: emailLogQuery }), engagement.emailLog);
+router.get("/notifications/email-log/export.csv", validate({ query: emailLogQuery }), engagement.exportEmailLog);
+router.get("/notifications/export.csv", validate({ query: campaignListQuery }), engagement.exportCampaigns);
+router.get("/notifications", validate({ query: campaignListQuery }), engagement.listCampaigns);
+router.post("/notifications", validate({ body: createCampaignSchema }), engagement.createCampaign);
+router.get("/notifications/:id", id, engagement.getCampaign);
+router.patch("/notifications/:id", id, validate({ body: updateCampaignSchema }), engagement.updateCampaign);
+router.delete("/notifications/:id", id, engagement.deleteCampaign);
+router.get("/notifications/:id/preview", id, engagement.previewCampaign);
+router.post("/notifications/:id/test", id, validate({ body: testSendSchema }), engagement.sendTest);
+router.post("/notifications/:id/send", id, engagement.sendBatch);
+router.post("/notifications/:id/cancel", id, engagement.cancelCampaign);
+
+/* Help & Support (storefront contact-form messages) */
+router.get("/contact-messages", validate({ query: supportListQuery }), engagement.listSupport);
+router.get("/contact-messages/export.csv", validate({ query: supportListQuery }), engagement.exportSupport);
+router.get("/contact-messages/:id", id, engagement.getSupport);
+router.patch("/contact-messages/:id", id, validate({ body: supportStatusSchema }), engagement.setSupportStatus);
+router.post("/contact-messages/:id/reply", id, validate({ body: supportReplySchema }), engagement.replySupport);
+router.post("/contact-messages/:id/notes", id, validate({ body: supportNoteSchema }), engagement.noteSupport);
+
+/* Newsletter, audit */
 router.get("/newsletter", site.newsletterList);
 router.get("/newsletter/export.csv", site.newsletterExport);
 router.get("/audit-logs", site.auditLogs);

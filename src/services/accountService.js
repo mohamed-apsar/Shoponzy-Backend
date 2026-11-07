@@ -97,7 +97,7 @@ export async function forgotPassword(email) {
   await PasswordReset.deleteMany({ user: user._id, usedAt: null });
   await PasswordReset.create({ user: user._id, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + RESET_TTL_MS) });
   const link = `${env.CLIENT_URL}/reset-password?token=${token}`;
-  await sendMail({ to: user.email, ...passwordResetEmail({ name: user.name, link }) });
+  await sendMail({ to: user.email, ...passwordResetEmail({ name: user.name, link }), type: "password_reset" });
 }
 
 export async function resetPassword(token, newPassword) {

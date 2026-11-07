@@ -14,6 +14,8 @@ const schema = z.object({
 
   CLIENT_URL: z.string().url().default(process.env.NODE_ENV === "production" ? "https://shoponzy-user-site.vercel.app" : "http://localhost:5173"),
   ADMIN_URL: z.string().url().default(process.env.NODE_ENV === "production" ? "https://shoponzy-admin.vercel.app" : "http://127.0.0.1:5176"),
+  // Public URL of this API including /api/v1 (used in email unsubscribe links). Defaults to the request host.
+  PUBLIC_API_URL: z.string().url().optional().or(z.literal("").transform(() => undefined)),
   // Extra comma-separated origins allowed by CORS (e.g. a staging domain).
   CORS_EXTRA_ORIGINS: z.string().default(""),
 

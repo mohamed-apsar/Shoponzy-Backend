@@ -51,6 +51,11 @@ export const DEFAULT_SETTINGS = {
   inventory: { lowStockThreshold: env.LOW_STOCK_THRESHOLD },
   // Admin-only and not a Manage Site section: edited through /admin/returns/reasons (which guards reasons in use).
   returns: { reasons: DEFAULT_RETURN_REASONS },
+  // Admin-only: which automatic emails are sent (Notifications → Email Notifications).
+  notifications: {
+    orderConfirmation: true, orderShipped: true, orderDelivered: true, orderCancelled: true,
+    returnUpdates: true, supportAutoReply: true,
+  },
 };
 
 export async function getSection(section) {

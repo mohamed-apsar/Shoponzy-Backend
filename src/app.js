@@ -27,6 +27,8 @@ export function createApp() {
     maxAge: 600,
   }));
   // The raw bytes are kept for webhook signature verification (the signature covers the exact body).
+  // One-click unsubscribe (RFC 8058) posts a small form body.
+  app.use("/api/v1/newsletter/unsubscribe", express.urlencoded({ extended: false, limit: "2kb" }));
   app.use(express.json({ limit: "100kb", verify: (req, _res, buf) => { if (req.url.startsWith("/api/v1/payments/webhook")) req.rawBody = buf; } }));
   app.use(cookieParser());
 
@@ -36,7 +38,7 @@ export function createApp() {
     health: "/api/v1/health",
     api: "/api/v1",
   }));
-  app.use("/api/v1", apiLimiter, csrfProtection({ exempt: ["/payments/webhook"] }), routes);
+  app.use("/api/v1", apiLimiter, csrfProtection({ exempt: ["/payments/webhook", "/newsletter/unsubscribe"] }), routes);
   app.use(notFound);
   app.use(errorHandler);
   return app;

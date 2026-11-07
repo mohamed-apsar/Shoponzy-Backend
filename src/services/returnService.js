@@ -7,6 +7,7 @@ import { inTransaction } from "../utils/transaction.js";
 import { escapeRegex } from "../validators/common.js";
 import { getSection, updateSection } from "./settingsService.js";
 import { issueRefund, restockVariant, updateStatus as updateOrderStatus } from "./orderService.js";
+import { sendReturnEmail } from "./notifyService.js";
 
 /* Return workflow
    requested → approved → (pickup_scheduled → in_transit →) received → inspected → completed
@@ -204,7 +205,7 @@ export async function approve(id, { note }, actor) {
   const rr = await loadForAdmin(id);
   const order = await Order.findById(rr.order).lean();
   const paid = order && PAID.includes(order.paymentStatus);
-  return transition(rr, "approved", actor, {
+  const updated = await transition(rr, "approved", actor, {
     note: note || "Return approved",
     set: {
       decidedBy: actor._id, decidedAt: new Date(), adminNote: note || rr.adminNote,
@@ -213,14 +214,18 @@ export async function approve(id, { note }, actor) {
       "refund.amount": paid ? maxRefundFor(rr.items, order) : null,
     },
   });
+  sendReturnEmail(updated, "approved");
+  return updated;
 }
 
 export async function reject(id, { reason, note }, actor) {
   const rr = await loadForAdmin(id);
-  return transition(rr, "rejected", actor, {
+  const updated = await transition(rr, "rejected", actor, {
     note: `Rejected: ${reason}`,
     set: { decidedBy: actor._id, decidedAt: new Date(), rejectionReason: reason, adminNote: note || rr.adminNote, "refund.status": "not_applicable" },
   });
+  sendReturnEmail(updated, "rejected");
+  return updated;
 }
 
 export async function setStatus(id, { status, note, pickup }, actor) {
@@ -342,6 +347,7 @@ export async function refund(id, { amount, manualReference, note }, actor) {
     $push: { history: { refundStatus: status, note: `Refund ₹${r.amount} ${completed ? "processed" : "initiated"} (${r.refundId})`, by: actor._id, at: new Date() } },
   }, { new: true });
   await audit("return.refunded", { actor: actor._id, entity: "ReturnRequest", entityId: rr._id, meta: { returnNumber: rr.returnNumber, amount: r.amount, refundId: r.refundId, status: r.status } });
+  if (completed) sendReturnEmail(updated, "refunded");
   return updated;
 }
 

@@ -41,6 +41,9 @@ r.get("/seo/robots.txt", site.robots);
 r.post("/seo/404", validate({ body: notFoundTrackSchema }), site.trackNotFound);
 r.post("/contact", formLimiter, optionalAuth("customer"), validate({ body: contactSchema }), site.contact);
 r.post("/newsletter", formLimiter, validate({ body: newsletterSchema }), site.newsletter);
+r.get("/newsletter/unsubscribe", site.unsubscribePage);
+r.post("/newsletter/unsubscribe", formLimiter, site.unsubscribe);
+r.get("/faqs", site.faqs);
 
 /* ---------- Cart (guests and customers) ---------- */
 r.get("/cart", optionalAuth("customer"), cartOwner(), cart.getCart);

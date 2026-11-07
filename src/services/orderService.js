@@ -11,6 +11,19 @@ import { getSection } from "./settingsService.js";
 import { getCart, priceCart } from "./cartService.js";
 import { getRazorpay, paymentMethodDetails, toPaise } from "./razorpayService.js";
 import { orderConfirmationEmail, orderStatusEmail, trySendMail } from "./emailService.js";
+import { notifyReturnRefunded } from "./notifyService.js";
+
+/* Order-update emails respect the switches in Notifications → Email Notifications. Fire-and-forget. */
+const ORDER_EMAIL_SWITCH = { confirmation: "orderConfirmation", shipped: "orderShipped", delivered: "orderDelivered", cancelled: "orderCancelled" };
+function sendOrderEmail(order, kind) {
+  if (!order?.contact?.email) return;
+  const message = kind === "confirmation" ? orderConfirmationEmail(order) : orderStatusEmail(order, kind);
+  if (!message) return;
+  getSection("notifications").then((n) => {
+    if (n[ORDER_EMAIL_SWITCH[kind]] === false) return;
+    return trySendMail({ to: order.contact.email, ...message, type: kind === "confirmation" ? "order_confirmation" : "order_status", ref: order.orderNumber });
+  }).catch(() => {});
+}
 
 /* ---------- Status rules ---------- */
 export const TRANSITIONS = {
@@ -157,7 +170,7 @@ export async function createOrder({ owner, input, ip }) {
       throw new AppError(502, "PAYMENT_GATEWAY_ERROR", "We couldn't start the online payment. Your bag has been kept — please try again or choose Cash on delivery.");
     }
   } else if (order.contact.email) {
-    trySendMail({ to: order.contact.email, ...orderConfirmationEmail(order) });
+    sendOrderEmail(order, "confirmation");
   }
   await audit("order.created", { actor: owner.userId, entity: "Order", entityId: order._id, ip, meta: { orderNumber: order.orderNumber, total: order.total, paymentMethod: order.paymentMethod } });
   return { order, payment: await paymentPayload(order) };
@@ -202,7 +215,7 @@ export async function markPaid(order, { providerPaymentId, method, details, amou
         $push: { history: { status: "placed", note: `Payment received (${via})`, at: now } } },
       { new: true },
     );
-    if (updated && updated.contact.email) trySendMail({ to: updated.contact.email, ...orderConfirmationEmail(updated) });
+    if (updated) sendOrderEmail(updated, "confirmation");
     return updated || Order.findById(order._id);
   }
 
@@ -260,7 +273,7 @@ export async function cancelOrder(orderId, { reason, by, byCustomer = false, sys
     await order.save({ session });
     return order;
   }).then((order) => {
-    if (!system && order.contact.email) trySendMail({ to: order.contact.email, ...orderStatusEmail(order, "cancelled") });
+    if (!system) sendOrderEmail(order, "cancelled");
     return order;
   });
 }
@@ -298,10 +311,7 @@ export async function updateStatus(orderId, { status, note, fulfilment, restock 
   order.history.push({ status, note, by: actor._id, at: now });
   await order.save();
   await audit("order.status_changed", { actor: actor._id, entity: "Order", entityId: order._id, meta: { orderNumber: order.orderNumber, status } });
-  if (order.contact.email) {
-    const mail = orderStatusEmail(order, status);
-    if (mail) trySendMail({ to: order.contact.email, ...mail });
-  }
+  sendOrderEmail(order, status);
   return order;
 }
 
@@ -418,6 +428,7 @@ export async function applyRefundStatus({ refundId, status, failureReason, via }
     });
   }
   await audit("refund.status_changed", { entity: "Payment", entityId: payment._id, meta: { refundId, status, via } });
+  if (status === "processed") await notifyReturnRefunded(refundId).catch(() => {});
   return { payment, entry, changed: true };
 }
 
