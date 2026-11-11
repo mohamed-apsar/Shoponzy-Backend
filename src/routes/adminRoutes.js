@@ -19,7 +19,11 @@ import { Banner, HomepageSection, Page, Popup } from "../models/site.js";
 import { MAX_UPLOAD_BYTES } from "../services/uploadService.js";
 import { listUsersQuery } from "../validators/userValidators.js";
 import { inventoryQuery, inventorySettingsSchema, movementsQuery, productThresholdSchema } from "../validators/inventoryValidators.js";
-import { userStatusSchema } from "../validators/accountValidators.js";
+import { changePasswordSchema, userStatusSchema } from "../validators/accountValidators.js";
+import * as account from "../services/accountService.js";
+import { loginIpLimiter } from "../middleware/rateLimits.js";
+import { audit } from "../models/AuditLog.js";
+import { ok } from "../utils/respond.js";
 import { objectId } from "../validators/common.js";
 import { adminProductsQuery, bulkProductsSchema, createCategorySchema, createProductSchema, listCategoriesQuery, stockAdjustSchema, updateCategorySchema, updateProductSchema } from "../validators/catalogValidators.js";
 import { adminOrdersQuery, cancelSchema, createCouponSchema, listQuery, refundSchema, refundsQuery, transactionsQuery, updateCouponSchema, updateFulfilmentSchema, updateOrderStatusSchema } from "../validators/commerceValidators.js";
@@ -31,6 +35,12 @@ router.use("/auth", authRouter("admin"));
 
 // Everything below requires an admin session (admin cookie + admin role, re-checked per request).
 router.use(authenticate("admin"), requireRole("admin"));
+
+router.post("/auth/password", loginIpLimiter, validate({ body: changePasswordSchema }), async (req, res) => {
+  await account.changePassword(req.auth.user._id, req.valid.body, req.auth.sessionId);
+  await audit("auth.admin_password_changed", { actor: req.auth.user._id, entity: "User", entityId: req.auth.user._id, ip: req.ip });
+  ok(res, { changed: true });
+});
 
 const id = validate({ params: z.object({ id: objectId }).passthrough() });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES, files: 1, fields: 5 } });
