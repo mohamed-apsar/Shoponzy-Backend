@@ -3,8 +3,11 @@ import * as account from "../services/accountService.js";
 import { clearAuthCookies } from "../services/tokenService.js";
 import { productsByIds } from "../services/catalogService.js";
 import { Product } from "../models/Product.js";
+import { Upload } from "../models/commerce.js";
+import { ContactMessage } from "../models/site.js";
+import { uploadImage } from "../services/uploadService.js";
 import { AppError } from "../utils/AppError.js";
-import { ok } from "../utils/respond.js";
+import { created, ok } from "../utils/respond.js";
 
 const uid = (req) => req.auth.user._id;
 
@@ -49,6 +52,39 @@ export async function addToWishlist(req, res) {
 export async function removeFromWishlist(req, res) {
   await User.updateOne({ _id: uid(req) }, { $pull: { wishlist: req.params.productId } });
   ok(res, await wishlistView(uid(req)));
+}
+
+/* ---------- Customer support tickets (stored with support inbox messages for admin handling) ---------- */
+export async function supportTickets(req, res) {
+  const tickets = await ContactMessage.find({ user: uid(req), kind: "ticket" })
+    .sort({ createdAt: -1 }).select("subject type priority message attachment status replies createdAt updatedAt").lean();
+  ok(res, tickets.map(({ _id, ...ticket }) => ({ id: String(_id), ...ticket })));
+}
+
+export async function createSupportTicket(req, res) {
+  const user = req.auth.user;
+  const input = req.valid.body;
+  let attachment;
+  if (input.attachment) {
+    const upload = await Upload.findOne({ publicId: input.attachment.publicId, kind: "supportTicket", uploadedBy: uid(req) }).lean();
+    if (!upload) throw AppError.badRequest("The attachment could not be found. Upload it again.");
+    attachment = { url: upload.url, publicId: upload.publicId, filename: input.attachment.filename };
+  }
+  const ticket = await ContactMessage.create({
+    user: uid(req), name: user.name, phone: user.phone || "Not provided", email: user.email,
+    kind: "ticket", subject: input.subject, type: input.type, topic: input.type, priority: input.priority,
+    message: input.message, attachment,
+  });
+  created(res, {
+    id: String(ticket._id), subject: ticket.subject, type: ticket.type, priority: ticket.priority,
+    message: ticket.message, attachment: ticket.attachment, status: ticket.status, createdAt: ticket.createdAt,
+  });
+}
+
+export async function uploadSupportTicketAttachment(req, res) {
+  if (!req.file) throw AppError.badRequest("Choose an image to attach.");
+  const upload = await uploadImage(req.file, "supportTicket", req.auth.user);
+  created(res, { publicId: upload.publicId, url: upload.url, filename: req.file.originalname });
 }
 
 /* After sign-in, the storefront sends the guest wishlist kept in the browser. */

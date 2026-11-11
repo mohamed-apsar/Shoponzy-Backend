@@ -167,7 +167,7 @@ function supportFilter({ q, status, topic, from, to }) {
   if (status) filter.status = status;
   if (topic) filter.topic = topic;
   if (from || to) filter.createdAt = { ...(from ? { $gte: from } : {}), ...(to ? { $lte: to } : {}) };
-  if (q) { const rx = new RegExp(escapeRegex(q), "i"); filter.$or = [{ name: rx }, { email: rx }, { phone: rx }, { orderNumber: rx }, { message: rx }]; }
+  if (q) { const rx = new RegExp(escapeRegex(q), "i"); filter.$or = [{ name: rx }, { email: rx }, { phone: rx }, { orderNumber: rx }, { subject: rx }, { message: rx }]; }
   return filter;
 }
 

@@ -108,6 +108,11 @@ const contactMessageSchema = new mongoose.Schema({
   name: { type: String, required: true, maxlength: 100 },
   phone: { type: String, required: true },
   email: String,
+  kind: { type: String, enum: ["contact", "ticket"], default: "contact", index: true },
+  subject: { type: String, maxlength: 120 },
+  type: { type: String, maxlength: 60 },
+  priority: { type: String, enum: ["low", "medium", "high"] },
+  attachment: { url: String, publicId: String, filename: String },
   topic: { type: String, maxlength: 60 },
   orderNumber: { type: String, maxlength: 20 },
   message: { type: String, required: true, maxlength: 3000 },
@@ -122,6 +127,7 @@ const contactMessageSchema = new mongoose.Schema({
   lastReplyAt: Date,
 }, { timestamps: true });
 contactMessageSchema.index({ createdAt: -1 });
+contactMessageSchema.index({ user: 1, kind: 1, createdAt: -1 });
 toJSONPlugin(contactMessageSchema);
 export const ContactMessage = mongoose.model("ContactMessage", contactMessageSchema);
 

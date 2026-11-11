@@ -36,6 +36,7 @@ export const UPLOAD_KINDS = {
   site: { folder: "site/general", maxBytes: 5 * MB },
   // Photos customers attach to a return request (uploaded from the storefront, not the admin panel).
   returnEvidence: { folder: "returns/return-evidence", maxBytes: 5 * MB },
+  supportTicket: { folder: "support/tickets", maxBytes: 5 * MB },
 };
 export const uploadFolder = (kind) => `${CLOUDINARY_ROOT}/${UPLOAD_KINDS[kind].folder}`;
 export const MAX_UPLOAD_BYTES = 8 * MB;

@@ -15,7 +15,7 @@ import { formLimiter, checkoutLimiter, trackLimiter, loginIpLimiter, returnUploa
 import { idsQuery, publicProductsQuery } from "../validators/catalogValidators.js";
 import { contactSchema, newsletterSchema, notFoundTrackSchema } from "../validators/contentValidators.js";
 import { addCartItemSchema, addressSchema, cancelSchema, checkoutSchema, couponSchema, myOrdersQuery, trackOrderSchema, updateCartItemSchema, verifyPaymentSchema } from "../validators/commerceValidators.js";
-import { changePasswordSchema, deleteAccountSchema, forgotPasswordSchema, profileSchema, resetPasswordSchema, wishlistAddSchema, wishlistMergeSchema } from "../validators/accountValidators.js";
+import { changePasswordSchema, createSupportTicketSchema, deleteAccountSchema, forgotPasswordSchema, profileSchema, resetPasswordSchema, wishlistAddSchema, wishlistMergeSchema } from "../validators/accountValidators.js";
 import { objectId } from "../validators/common.js";
 import { z } from "zod";
 
@@ -77,6 +77,7 @@ r.post("/auth/reset-password", loginIpLimiter, validate({ body: resetPasswordSch
 /* ---------- Account (signed-in customers) ---------- */
 const acct = Router();
 acct.use(authenticate("customer"));
+const supportTicketUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: UPLOAD_KINDS.supportTicket.maxBytes, files: 1, fields: 1 } });
 acct.patch("/profile", validate({ body: profileSchema }), account.updateProfile);
 acct.post("/password", loginIpLimiter, validate({ body: changePasswordSchema }), account.changePassword);
 acct.post("/delete", loginIpLimiter, validate({ body: deleteAccountSchema }), account.deleteAccount);
@@ -88,6 +89,9 @@ acct.get("/wishlist", account.wishlist);
 acct.post("/wishlist", validate({ body: wishlistAddSchema }), account.addToWishlist);
 acct.post("/wishlist/merge", validate({ body: wishlistMergeSchema }), account.mergeWishlist);
 acct.delete("/wishlist/:productId", idParam("productId"), account.removeFromWishlist);
+acct.get("/tickets", account.supportTickets);
+acct.post("/tickets", formLimiter, validate({ body: createSupportTicketSchema }), account.createSupportTicket);
+acct.post("/tickets/attachment", returnUploadLimiter, supportTicketUpload.single("file"), account.uploadSupportTicketAttachment);
 r.use("/account", acct);
 
 export default r;
