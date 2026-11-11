@@ -76,6 +76,16 @@ export const SETTINGS_SCHEMAS = {
   inventory: z.object({
     lowStockThreshold: z.number().int().min(0).max(100_000),
   }).strict(),
+  shipping: z.object({
+    states: z.array(z.object({
+      name: text(80).min(1), enabled: z.boolean(),
+      districts: z.array(z.object({ name: text(80).min(1), enabled: z.boolean() }).strict()).max(100),
+    }).strict()).max(40),
+    pincodes: z.array(z.object({
+      code: z.string().regex(/^\d{6}$/), state: text(80).min(1), district: text(80).min(1),
+      price: z.number().min(0).max(10_000), enabled: z.boolean(),
+    }).strict()).max(20_000),
+  }).strict(),
 };
 
 export const SECTIONS = Object.keys(SETTINGS_SCHEMAS);

@@ -49,6 +49,7 @@ export const DEFAULT_SETTINGS = {
     deliveryText: "Usually delivered in 3–7 working days", returnDays: 7,
   },
   inventory: { lowStockThreshold: env.LOW_STOCK_THRESHOLD },
+  shipping: { states: [], pincodes: [] },
   // Admin-only and not a Manage Site section: edited through /admin/returns/reasons (which guards reasons in use).
   returns: { reasons: DEFAULT_RETURN_REASONS },
   // Admin-only: which automatic emails are sent (Notifications → Email Notifications).

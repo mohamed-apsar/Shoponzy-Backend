@@ -106,7 +106,18 @@ export async function createOrder({ owner, input, ip }) {
   if (priced.coupon && !priced.coupon.applied && !/more to use/.test(priced.coupon.message)) throw new AppError(409, "COUPON_INVALID", priced.coupon.message);
 
   const commerce = await getSection("commerce");
-  const totals = priced.totals[input.paymentMethod];
+  const configuredShipping = await getSection("shipping");
+  const pin = String(input.shippingAddress?.pincode || "");
+  let shippingFee = priced.totals[input.paymentMethod].shippingFee;
+  if (configuredShipping.pincodes.length) {
+    const rate = configuredShipping.pincodes.find((entry) => entry.code === pin && entry.enabled);
+    const state = rate && configuredShipping.states.find((entry) => entry.enabled && entry.name.toLowerCase() === rate.state.toLowerCase());
+    const district = state?.districts.find((entry) => entry.enabled && entry.name.toLowerCase() === rate.district.toLowerCase());
+    if (!rate || !district) throw new AppError(400, "DELIVERY_UNAVAILABLE", "Delivery is not available for this PIN code.");
+    shippingFee = rate.price;
+  }
+  const baseTotals = priced.totals[input.paymentMethod];
+  const totals = { ...baseTotals, shippingFee, total: Math.max(0, baseTotals.total - baseTotals.shippingFee + shippingFee) };
   if (input.paymentMethod === "cod") {
     if (!commerce.codEnabled) throw new AppError(400, "COD_UNAVAILABLE", "Cash on delivery is not available right now.");
     if (commerce.codMaxOrderValue && totals.total > commerce.codMaxOrderValue) throw new AppError(400, "COD_UNAVAILABLE", `Cash on delivery is available for orders up to ₹${commerce.codMaxOrderValue.toLocaleString("en-IN")}.`);
