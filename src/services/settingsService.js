@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS = {
   homeCategories: { categories: [], showAllCategories: true, showNewIn: true, showDeals: true },
   general: {
     websiteName: "Shoponzy", tagline: "Shoes, sunglasses, perfumes, clothing, watches & essentials", websiteUrl: "https://shoponzy.in",
+    taxRate: 0,
     currency: "INR", language: "English", productsPerPage: 24, gridColumns: 4, breadcrumbs: true, wishlist: true, comparison: false,
   },
   branding: {

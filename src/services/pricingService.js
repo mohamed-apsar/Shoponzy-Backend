@@ -4,14 +4,15 @@ import { round2 } from "../models/shared.js";
 /* Pure totals calculation shared by cart, checkout and order creation.
    Order of application: coupon on the subtotal, then the prepaid discount on what remains;
    shipping is free once (subtotal − coupon) reaches the threshold. */
-export function computeTotals({ subtotal, mrpTotal, couponDiscount = 0, paymentMethod, commerce }) {
+export function computeTotals({ subtotal, mrpTotal, couponDiscount = 0, paymentMethod, commerce, taxRate = 0 }) {
   const afterCoupon = round2(Math.max(0, subtotal - couponDiscount));
   const prepaidDiscount = paymentMethod === "razorpay" ? Math.round((afterCoupon * commerce.prepaidOffPct) / 100) : 0;
   const shippingFee = subtotal === 0 || afterCoupon >= commerce.freeShippingAbove ? 0 : commerce.shippingFee;
-  const total = round2(afterCoupon - prepaidDiscount + shippingFee);
+  const tax = round2(Math.max(0, afterCoupon - prepaidDiscount) * taxRate / 100);
+  const total = round2(afterCoupon - prepaidDiscount + shippingFee + tax);
   return {
     subtotal: round2(subtotal), mrpTotal: round2(mrpTotal), mrpSavings: round2(Math.max(0, mrpTotal - subtotal)),
-    couponDiscount: round2(couponDiscount), prepaidDiscount, shippingFee, total,
+    couponDiscount: round2(couponDiscount), prepaidDiscount, shippingFee, tax, total,
     freeShippingRemaining: round2(Math.max(0, commerce.freeShippingAbove - afterCoupon)),
   };
 }

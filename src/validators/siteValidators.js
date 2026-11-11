@@ -27,6 +27,7 @@ export const SETTINGS_SCHEMAS = {
   }).strict(),
   general: z.object({
     websiteName: text(60).min(1), tagline: text(120), websiteUrl: optionalUrl,
+    taxRate: z.number().min(0).max(100),
     currency: z.enum(["INR"]), language: z.enum(["English"]),
     productsPerPage: z.coerce.number().int().min(4).max(96), gridColumns: z.coerce.number().int().min(2).max(6),
     breadcrumbs: z.boolean(), wishlist: z.boolean(), comparison: z.boolean(),

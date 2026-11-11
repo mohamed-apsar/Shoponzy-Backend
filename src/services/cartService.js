@@ -95,6 +95,7 @@ export async function priceCart(cart, { userId, phone } = {}) {
   const products = await Product.find({ _id: { $in: ids }, ...(await visibleFilter()) }).lean();
   const byId = new Map(products.map((p) => [String(p._id), p]));
   const commerce = await getSection("commerce");
+  const general = await getSection("general");
 
   const lines = cart.items.map((i) => {
     const p = byId.get(String(i.product));
@@ -116,7 +117,7 @@ export async function priceCart(cart, { userId, phone } = {}) {
   const subtotal = round2(buyable.reduce((s, l) => s + l.lineTotal, 0));
   const mrpTotal = round2(buyable.reduce((s, l) => s + l.mrp * l.qty, 0));
   const c = await evaluateCoupon(cart.couponCode, subtotal, { userId, phone });
-  const base = { subtotal, mrpTotal, couponDiscount: c.discount, commerce };
+  const base = { subtotal, mrpTotal, couponDiscount: c.discount, commerce, taxRate: general.taxRate || 0 };
   return {
     lines,
     itemCount: lines.reduce((s, l) => s + l.qty, 0),

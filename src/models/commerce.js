@@ -94,7 +94,7 @@ const orderSchema = new mongoose.Schema({
   couponDiscount: { type: Number, default: 0 },
   prepaidDiscount: { type: Number, default: 0 },
   shippingFee: { type: Number, default: 0 },
-  tax: { type: Number, default: 0 }, // prices are tax-inclusive
+  tax: { type: Number, default: 0 }, // tax collected on discounted product prices at checkout
   total: { type: Number, required: true },
   currency: { type: String, default: "INR" },
   paymentMethod: { type: String, enum: ["cod", "razorpay"], required: true },

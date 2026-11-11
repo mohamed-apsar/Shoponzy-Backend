@@ -150,7 +150,7 @@ export async function createOrder({ owner, input, ip }) {
         _id: orderId, orderNumber: `SZ${100000 + seq}`, user: owner.userId || undefined, guestId: owner.userId ? undefined : owner.guestId,
         contact: input.contact, items, shippingAddress: input.shippingAddress,
         subtotal: totals.subtotal, mrpTotal: totals.mrpTotal, couponCode: couponApplied || undefined, couponDiscount: totals.couponDiscount,
-        prepaidDiscount: totals.prepaidDiscount, shippingFee: totals.shippingFee, total: totals.total,
+        prepaidDiscount: totals.prepaidDiscount, shippingFee: totals.shippingFee, tax: totals.tax, total: totals.total,
         paymentMethod: input.paymentMethod, paymentStatus: "pending",
         status: isCod ? "placed" : "pending_payment", stockReserved: true,
         reservationExpiresAt: isCod ? undefined : new Date(now.getTime() + env.ORDER_RESERVATION_MINUTES * 60_000),
