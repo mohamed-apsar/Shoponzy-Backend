@@ -56,6 +56,7 @@ export const adminOrdersQuery = z.object({
 export const updateOrderStatusSchema = z.object({
   status: z.enum(ORDER_STATUSES.filter((s) => s !== "pending_payment" && s !== "placed")),
   note: z.string().trim().max(300).optional(),
+  force: z.boolean().optional(),
   fulfilment: z.object({ courier: z.string().trim().max(60).optional(), trackingNumber: z.string().trim().max(60).optional(), trackingUrl: z.string().trim().url().max(500).regex(/^https?:\/\//).optional() }).strict().optional(),
   restock: z.boolean().optional(),
 }).strict();
@@ -69,7 +70,7 @@ export const refundSchema = z.object({
   reason: z.string().trim().max(200).optional(),
   manualReference: z.string().trim().max(80).optional(), // COD refunds paid by bank/UPI
 }).strict();
-export const cancelSchema = z.object({ reason: z.string().trim().max(200).optional() }).strict();
+export const cancelSchema = z.object({ reason: z.string().trim().max(200).optional(), force: z.boolean().optional() }).strict();
 
 const couponBase = {
   code: z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{3,30}$/, "3–30 letters, numbers, - or _."),

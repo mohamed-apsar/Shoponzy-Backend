@@ -252,12 +252,12 @@ export async function recordPaymentFailure(providerOrderId, { providerPaymentId,
 }
 
 /* ---------- Cancellation ---------- */
-export async function cancelOrder(orderId, { reason, by, byCustomer = false, system = false }) {
+export async function cancelOrder(orderId, { reason, by, byCustomer = false, system = false, force = false }) {
   return inTransaction(async (session) => {
     const order = await Order.findById(orderId).session(session);
     if (!order) throw AppError.notFound("Order not found.");
     const allowed = byCustomer ? CUSTOMER_CANCELLABLE : TRANSITIONS[order.status];
-    if (!allowed.includes(byCustomer ? order.status : "cancelled")) {
+    if (!force && !allowed.includes(byCustomer ? order.status : "cancelled")) {
       throw new AppError(409, "INVALID_TRANSITION", byCustomer ? "This order can no longer be cancelled online. Please contact us." : `A ${order.status.replace("_", " ")} order can't be cancelled.`);
     }
     if (order.stockReserved && STOCK_HELD.includes(order.status)) {
@@ -280,11 +280,39 @@ export async function cancelOrder(orderId, { reason, by, byCustomer = false, sys
 }
 
 /* ---------- Admin status changes ---------- */
-export async function updateStatus(orderId, { status, note, fulfilment, restock = true }, actor) {
-  if (status === "cancelled") return cancelOrder(orderId, { reason: note || "Cancelled by store", by: actor._id });
+export async function updateStatus(orderId, { status, note, fulfilment, restock = true, force = false }, actor) {
+  if (status === "cancelled") return cancelOrder(orderId, { reason: note || "Cancelled by store", by: actor._id, force });
   const order = await Order.findById(orderId);
   if (!order) throw AppError.notFound("Order not found.");
-  if (!TRANSITIONS[order.status].includes(status)) throw new AppError(409, "INVALID_TRANSITION", `Can't change a ${order.status.replace("_", " ")} order to ${status}.`);
+  if (!force && !TRANSITIONS[order.status].includes(status)) throw new AppError(409, "INVALID_TRANSITION", `Can't change a ${order.status.replace("_", " ")} order to ${status}.`);
+
+  if (force && order.status === "cancelled" && !order.stockReserved) {
+    const now = new Date();
+    const reopened = await inTransaction(async (session) => {
+      const current = await Order.findById(orderId).session(session);
+      if (!current) throw AppError.notFound("Order not found.");
+      if (current.status !== "cancelled" || current.stockReserved) throw new AppError(409, "ORDER_CHANGED", "The order changed while its status was being updated. Refresh and try again.");
+      await takeStock(current.items, current._id, session);
+      current.stockReserved = true;
+      current.cancelReason = null;
+      current.reservationExpiresAt = null;
+      if (status === "shipped") current.fulfilment = { ...current.fulfilment?.toObject?.(), shippedAt: now };
+      if (status === "delivered") {
+        current.fulfilment = { ...current.fulfilment?.toObject?.(), deliveredAt: now };
+        if (current.paymentMethod === "cod") {
+          current.paymentStatus = "paid";
+          await Payment.updateOne({ order: current._id, provider: "cod" }, { $set: { status: "captured" } }, { session });
+        }
+      }
+      current.status = status;
+      current.history.push({ status, note, by: actor._id, at: now });
+      await current.save({ session });
+      return current;
+    });
+    await audit("order.status_changed", { actor: actor._id, entity: "Order", entityId: reopened._id, meta: { orderNumber: reopened.orderNumber, status } });
+    sendOrderEmail(reopened, status);
+    return reopened;
+  }
 
   const now = new Date();
   if (fulfilment) order.fulfilment = { ...order.fulfilment?.toObject?.(), ...fulfilment };

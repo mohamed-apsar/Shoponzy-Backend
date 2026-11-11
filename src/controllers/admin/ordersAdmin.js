@@ -61,7 +61,7 @@ export async function updateFulfilment(req, res) {
 }
 
 export async function cancel(req, res) {
-  const order = await orders.cancelOrder(req.params.id, { reason: req.valid.body.reason || "Cancelled by store", by: req.auth.user._id });
+  const order = await orders.cancelOrder(req.params.id, { reason: req.valid.body.reason || "Cancelled by store", by: req.auth.user._id, force: req.valid.body.force });
   await audit("order.cancelled", { actor: req.auth.user._id, entity: "Order", entityId: order._id, ip: req.ip });
   ok(res, { order });
 }
