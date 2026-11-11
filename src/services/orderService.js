@@ -32,7 +32,8 @@ export const TRANSITIONS = {
   confirmed: ["packed", "shipped", "cancelled"],
   packed: ["shipped", "cancelled"],
   shipped: ["delivered", "returned"],
-  delivered: ["returned"],
+  // Admins may correct a mistakenly marked delivered order from the status dropdown.
+  delivered: ["confirmed", "packed", "shipped", "cancelled", "returned"],
   cancelled: [],
   returned: [],
 };
