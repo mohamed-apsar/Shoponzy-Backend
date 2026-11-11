@@ -26,10 +26,29 @@ export async function listCategories(req, res) {
     Category.countDocuments(filter),
   ]);
   // productCount helps admins see which categories are in use before deleting.
-  const counts = await Product.aggregate([{ $match: { status: { $ne: "archived" }, categoryPath: { $in: items.map((c) => c._id) } } }, { $unwind: "$categoryPath" }, { $group: { _id: "$categoryPath", n: { $sum: 1 } } }]);
+  const categoryIds = items.map((c) => c._id);
+  const [counts, productsWithImages] = await Promise.all([
+    Product.aggregate([{ $match: { status: { $ne: "archived" }, categoryPath: { $in: categoryIds } } }, { $unwind: "$categoryPath" }, { $group: { _id: "$categoryPath", n: { $sum: 1 } } }]),
+    Product.find({ status: { $ne: "archived" }, categoryPath: { $in: categoryIds } })
+      .select("categoryPath images colors.featuredImage")
+      .sort({ createdAt: 1, _id: 1 })
+      .lean(),
+  ]);
   const byId = new Map(counts.map((c) => [String(c._id), c.n]));
+  const categoryIdSet = new Set(categoryIds.map(String));
+  const productImageByCategory = new Map();
+  for (const product of productsWithImages) {
+    const image = product.images?.find((item) => item.url)
+      || product.colors?.find((color) => color.featuredImage?.url)?.featuredImage;
+    if (!image) continue;
+    for (const categoryId of product.categoryPath || []) {
+      const key = String(categoryId);
+      if (categoryIdSet.has(key) && !productImageByCategory.has(key)) productImageByCategory.set(key, image);
+    }
+  }
   ok(res, items.map(({ _id, __v, ancestors, ...c }) => ({
     id: String(_id), ...c, parent: c.parent ? String(c.parent) : null,
+    productImage: c.productImage || productImageByCategory.get(String(_id)) || null,
     ancestors: ancestors.map((a) => ({ id: String(a._id), name: a.name, slug: a.slug })),
     pathNames: ancestors.map((a) => a.name).join(" / "), productCount: byId.get(String(_id)) || 0,
   })), meta(total));
