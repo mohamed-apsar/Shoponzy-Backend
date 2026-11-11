@@ -52,6 +52,7 @@ const variant = z.object({
   size: z.string().trim().max(20).nullable().default(null),
   price: money, mrp: money.optional().default(0),
   stock: z.coerce.number().int().min(0).max(1_000_000),
+  minStock: z.coerce.number().int().min(0).max(1_000_000).default(0),
   status: z.enum(["active", "disabled"]).default("active"),
 }).strict();
 const productColor = z.object({

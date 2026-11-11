@@ -20,6 +20,7 @@ const variantSchema = new mongoose.Schema({
   price: { type: Number, required: true, min: 0 },
   mrp: { type: Number, min: 0, default: 0 },
   stock: { type: Number, required: true, min: 0, default: 0, validate: Number.isInteger },
+  minStock: { type: Number, min: 0, default: 0, validate: Number.isInteger },
   status: { type: String, enum: ["active", "disabled"], default: "active" },
 });
 toJSONPlugin(variantSchema);
