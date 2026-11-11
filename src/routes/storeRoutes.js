@@ -51,6 +51,7 @@ r.get("/cart", optionalAuth("customer"), cartOwner(), cart.getCart);
 r.post("/cart/items", validate({ body: addCartItemSchema }), optionalAuth("customer"), cartOwner({ create: true }), cart.addItem);
 r.patch("/cart/items/:itemId", idParam("itemId"), validate({ body: updateCartItemSchema }), optionalAuth("customer"), cartOwner(), cart.updateItem);
 r.delete("/cart/items/:itemId", idParam("itemId"), optionalAuth("customer"), cartOwner(), cart.removeItem);
+r.get("/coupons", cart.couponOffers);
 r.get("/coupons/:code", trackLimiter, validate({ params: z.object({ code: z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{3,30}$/, "Check the code.") }) }), cart.couponInfo);
 r.put("/cart/coupon",validate({ body: couponSchema }), optionalAuth("customer"), cartOwner({ create: true }), cart.setCoupon);
 
