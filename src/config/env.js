@@ -22,6 +22,7 @@ const schema = z.object({
   JWT_SECRET: isTest ? z.string().default("test-secret-test-secret-test-secret-0000") : z.string().min(32, "JWT_SECRET must be at least 32 characters"),
   ACCESS_TOKEN_TTL_MIN: z.coerce.number().int().positive().default(15),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  ADMIN_REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(90),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(isTest ? 4 : 12),
 
   COOKIE_SECURE: z.enum(["true", "false"]).default(String(secureCookies)).transform((v) => isVercel || v === "true"),
