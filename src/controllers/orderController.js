@@ -37,6 +37,20 @@ async function findOwnOrder(req) {
 
 export async function myOrders(req, res) {
   const { skip, limit, meta } = paginate(req.valid.query);
+  const customer = req.auth.user;
+  // Recover older guest-checkout orders after the guest cookie has already been cleared.
+  // Require both the account email and phone to match before attaching any order.
+  if (customer.email && customer.phone) {
+    await Order.updateMany(
+      {
+        user: { $exists: false },
+        "contact.email": customer.email.toLowerCase(),
+        "contact.phone": customer.phone,
+        status: { $ne: "pending_payment" },
+      },
+      { $set: { user: customer._id }, $unset: { guestId: "" } },
+    );
+  }
   const filter = { user: req.owner.userId, status: { $ne: "pending_payment" } };
   const [items, total] = await Promise.all([Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit), Order.countDocuments(filter)]);
   ok(res, items.map(orders.customerOrderView), meta(total));
