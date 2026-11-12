@@ -3,6 +3,7 @@ import { AUDIENCES, clearAuthCookies, setAuthCookies } from "../services/tokenSe
 import { created, ok } from "../utils/respond.js";
 import { GUEST_CART_COOKIE, mergeGuestCart } from "../services/cartService.js";
 import { clearGuestCookie } from "../middleware/cartOwner.js";
+import { Order } from "../models/commerce.js";
 
 const ctx = (req) => ({ ip: req.ip, userAgent: req.get("user-agent") });
 
@@ -11,6 +12,11 @@ async function adoptGuestCart(req, res, userId) {
   const guestId = req.cookies?.[GUEST_CART_COOKIE];
   if (!guestId) return;
   await mergeGuestCart(guestId, userId);
+  // Keep orders placed in this browser available after the customer signs in.
+  await Order.updateMany(
+    { guestId, user: { $exists: false }, status: { $ne: "pending_payment" } },
+    { $set: { user: userId }, $unset: { guestId: "" } },
+  );
   clearGuestCookie(res);
 }
 
