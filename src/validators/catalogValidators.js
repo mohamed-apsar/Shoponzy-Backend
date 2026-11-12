@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { objectId, pagination } from "./common.js";
 import { imageRef, robotsDirectivesSchema } from "./siteValidators.js";
-import { BADGES, PRODUCT_STATUSES } from "../models/Product.js";
+import { PRODUCT_STATUSES } from "../models/Product.js";
 import { MANUAL_STOCK_REASONS } from "../models/commerce.js";
 
 const slug = z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use lowercase letters, numbers and hyphens.").max(80);
@@ -86,7 +86,7 @@ const productBase = {
   weightGrams: z.coerce.number().min(0).max(1_000_000).optional(),
   dimensionsCm: z.object({ length: z.number().min(0), width: z.number().min(0), height: z.number().min(0) }).partial().strict().optional(),
   isNewArrival: z.boolean().optional(), isBestseller: z.boolean().optional(), isTrending: z.boolean().optional(), isFeatured: z.boolean().optional(),
-  badge: z.enum(BADGES).optional(),
+  badge: z.string().trim().max(40).optional(),
   occasions: z.array(z.string().trim().max(40)).max(10).optional(),
   status: z.enum(PRODUCT_STATUSES).optional(),
   lowStockThreshold: z.number().int().min(0).max(100_000).nullable().optional(),
@@ -123,6 +123,12 @@ export const bulkProductsSchema = z.object({
   ids: z.array(objectId).min(1).max(200),
   action: z.enum(["activate", "disable", "archive", "delete"]),
 }).strict();
+export const productBadgesSchema = z.object({
+  badges: z.array(z.string().trim().min(1).max(40)).max(30),
+}).strict().superRefine(({ badges }, ctx) => {
+  const normalized = badges.map((badge) => badge.toLowerCase());
+  if (new Set(normalized).size !== normalized.length) ctx.addIssue({ code: "custom", path: ["badges"], message: "Badge names must be unique." });
+});
 
 /* ---------- Public listing ---------- */
 export const publicProductsQuery = z.object({

@@ -61,7 +61,7 @@ const productSchema = new mongoose.Schema({
   isBestseller: { type: Boolean, default: false },
   isTrending: { type: Boolean, default: false },
   isFeatured: { type: Boolean, default: false },
-  badge: { type: String, enum: BADGES, default: "" },
+  badge: { type: String, trim: true, maxlength: 40, default: "" },
   occasions: [{ type: String, trim: true, maxlength: 40 }],
   status: { type: String, enum: PRODUCT_STATUSES, default: "active", index: true },
   // Per-product low-stock alert level; null = the store-wide threshold (Inventory settings).

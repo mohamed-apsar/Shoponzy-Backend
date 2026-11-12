@@ -8,6 +8,7 @@ import { AppError } from "../utils/AppError.js";
 import { slugify } from "../utils/slugify.js";
 import { inTransaction } from "../utils/transaction.js";
 import { imageIds, releaseImages, resolveImageKeeping, resolveImages, resolveImagesKeeping } from "./uploadService.js";
+import { validateProductBadge } from "./productBadgeService.js";
 
 async function uniqueSlug(base, exceptId) {
   let slug = base, n = 1;
@@ -95,6 +96,7 @@ async function categoryPathFor(categoryId) {
 }
 
 export async function createProduct(input, actor) {
+  await validateProductBadge(input.badge);
   const { price: _p, mrp: _m, stock: _s, seo, ...rest } = input;
   const opts = normaliseVariants(input);
   const product = new Product({
@@ -115,6 +117,7 @@ export async function createProduct(input, actor) {
 }
 
 export async function updateProduct(id, input, actor) {
+  if (input.badge !== undefined) await validateProductBadge(input.badge);
   const product = await Product.findById(id);
   if (!product) throw AppError.notFound("Product not found.");
   const oldImages = productImageIds(product);

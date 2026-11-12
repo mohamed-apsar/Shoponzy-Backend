@@ -6,6 +6,7 @@ import { validate } from "../middleware/validate.js";
 import { exportUsers, listUsers } from "../controllers/adminUserController.js";
 import * as customers from "../controllers/admin/customersAdmin.js";
 import * as catalog from "../controllers/admin/catalogAdmin.js";
+import * as productBadges from "../controllers/admin/productBadgesAdmin.js";
 import * as orders from "../controllers/admin/ordersAdmin.js";
 import * as site from "../controllers/admin/siteAdmin.js";
 import * as inventory from "../controllers/admin/inventoryAdmin.js";
@@ -25,7 +26,7 @@ import { loginIpLimiter } from "../middleware/rateLimits.js";
 import { audit } from "../models/AuditLog.js";
 import { ok } from "../utils/respond.js";
 import { objectId } from "../validators/common.js";
-import { adminProductsQuery, bulkProductsSchema, createCategorySchema, createProductSchema, listCategoriesQuery, stockAdjustSchema, updateCategorySchema, updateProductSchema } from "../validators/catalogValidators.js";
+import { adminProductsQuery, bulkProductsSchema, createCategorySchema, createProductSchema, listCategoriesQuery, productBadgesSchema, stockAdjustSchema, updateCategorySchema, updateProductSchema } from "../validators/catalogValidators.js";
 import { adminOrdersQuery, cancelSchema, createCouponSchema, listQuery, refundSchema, refundsQuery, transactionsQuery, updateCouponSchema, updateFulfilmentSchema, updateOrderStatusSchema } from "../validators/commerceValidators.js";
 import { createBannerSchema, createPageSchema, createPopupSchema, createSectionSchema, notFoundRedirectSchema, reorderSchema, updateBannerSchema, updatePageSchema, updatePopupSchema, updateSectionSchema } from "../validators/contentValidators.js";
 import { authRouter } from "./authRoutes.js";
@@ -82,6 +83,8 @@ router.patch("/categories/:id", id, validate({ body: updateCategorySchema }), ca
 router.delete("/categories/:id", id, catalog.deleteCategory);
 
 /* Products & inventory */
+router.get("/product-badges", productBadges.list);
+router.put("/product-badges", validate({ body: productBadgesSchema }), productBadges.save);
 router.get("/products", validate({ query: adminProductsQuery }), catalog.listProducts);
 router.get("/products/export.csv", catalog.exportProducts);
 router.post("/products/bulk", validate({ body: bulkProductsSchema }), catalog.bulkProducts);
