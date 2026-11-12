@@ -14,6 +14,7 @@ const categorySchema = new mongoose.Schema({
   level: { type: Number, required: true, min: 1, max: MAX_CATEGORY_LEVEL },
   path: { type: String, required: true, unique: true },
   description: { type: String, maxlength: 2000, default: "" },
+  brand: { type: String, trim: true, maxlength: 80, default: "" },
   image: { type: imageSchema, default: null },
   productImage: { type: imageSchema, default: null },
   exploreImage: { type: imageSchema, default: null },

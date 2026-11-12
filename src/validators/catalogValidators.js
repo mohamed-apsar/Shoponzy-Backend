@@ -22,6 +22,7 @@ const categoryBase = {
   slug,
   parent: objectId.nullable().optional(),
   description: z.string().trim().max(2000).optional(),
+  brand: z.string().trim().max(80).optional(),
   image: imageRef.optional(),
   productImage: imageRef.optional(),
   exploreImage: imageRef.optional(),
