@@ -34,6 +34,25 @@ export async function changePassword(userId, { currentPassword, newPassword }, k
   await Session.updateMany({ user: userId, revokedAt: null, _id: { $ne: keepSessionId } }, { revokedAt: new Date(), revokedReason: "password_changed" });
 }
 
+export async function changeAdminEmail(userId, { currentPassword, newEmail }, keepSessionId) {
+  const user = await checkPassword(userId, currentPassword);
+  if (user.role !== "admin") throw AppError.forbidden();
+  const normalizedEmail = newEmail.trim().toLowerCase();
+  if (normalizedEmail === user.email) return user;
+  if (await User.exists({ email: normalizedEmail, _id: { $ne: userId } })) {
+    throw AppError.conflict("An account with this email already exists.");
+  }
+  user.email = normalizedEmail;
+  try {
+    await user.save();
+  } catch (error) {
+    if (error?.code === 11000) throw AppError.conflict("An account with this email already exists.");
+    throw error;
+  }
+  await Session.updateMany({ user: userId, revokedAt: null, _id: { $ne: keepSessionId } }, { revokedAt: new Date(), revokedReason: "email_changed" });
+  return user;
+}
+
 /* ---------- Addresses ---------- */
 export async function addAddress(userId, data) {
   const user = await User.findById(userId);
