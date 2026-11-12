@@ -23,7 +23,7 @@ export const sitemapXmlSchema = z.string().trim().max(8_000_000).refine(
 export const SETTINGS_SCHEMAS = {
   homeCategories: z.object({
     categories: z.array(z.string().trim().min(1).max(80)).max(30),
-    showAllCategories: z.boolean(), showNewIn: z.boolean(), showDeals: z.boolean(),
+    showAllCategories: z.boolean(), showNewIn: z.boolean(), newInImage: imageRef.optional(),
   }).strict(),
   general: z.object({
     websiteName: text(60).min(1), tagline: text(120), websiteUrl: optionalUrl,

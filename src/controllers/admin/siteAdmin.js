@@ -17,7 +17,7 @@ export async function dashboard(req, res) {
 }
 
 /* ---------- Manage Site settings ---------- */
-const IMAGE_KEYS = ["logo", "footerLogo", "favicon", "headerLogo", "shareImage", "illustration"];
+const IMAGE_KEYS = ["logo", "footerLogo", "favicon", "headerLogo", "shareImage", "illustration", "newInImage"];
 
 export const allSettings = async (_req, res) => ok(res, await settings.getAllSettings());
 
