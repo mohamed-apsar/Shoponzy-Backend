@@ -19,7 +19,7 @@ import { Banner, HomepageSection, Page, Popup } from "../models/site.js";
 import { MAX_UPLOAD_BYTES } from "../services/uploadService.js";
 import { listUsersQuery } from "../validators/userValidators.js";
 import { inventoryQuery, inventorySettingsSchema, movementsQuery, productThresholdSchema } from "../validators/inventoryValidators.js";
-import { changeAdminEmailSchema, changePasswordSchema, userStatusSchema } from "../validators/accountValidators.js";
+import { changeAdminCredentialsSchema, changeAdminEmailSchema, changePasswordSchema, userStatusSchema } from "../validators/accountValidators.js";
 import * as account from "../services/accountService.js";
 import { loginIpLimiter } from "../middleware/rateLimits.js";
 import { audit } from "../models/AuditLog.js";
@@ -44,6 +44,11 @@ router.post("/auth/password", loginIpLimiter, validate({ body: changePasswordSch
 router.post("/auth/email", loginIpLimiter, validate({ body: changeAdminEmailSchema }), async (req, res) => {
   const user = await account.changeAdminEmail(req.auth.user._id, req.valid.body, req.auth.sessionId);
   await audit("auth.admin_email_changed", { actor: req.auth.user._id, entity: "User", entityId: req.auth.user._id, ip: req.ip });
+  ok(res, { user });
+});
+router.post("/auth/credentials", loginIpLimiter, validate({ body: changeAdminCredentialsSchema }), async (req, res) => {
+  const user = await account.changeAdminCredentials(req.auth.user._id, req.valid.body, req.auth.sessionId);
+  await audit("auth.admin_credentials_changed", { actor: req.auth.user._id, entity: "User", entityId: req.auth.user._id, ip: req.ip });
   ok(res, { user });
 });
 

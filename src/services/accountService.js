@@ -53,6 +53,25 @@ export async function changeAdminEmail(userId, { currentPassword, newEmail }, ke
   return user;
 }
 
+export async function changeAdminCredentials(userId, { currentPassword, newEmail, newPassword }, keepSessionId) {
+  const user = await checkPassword(userId, currentPassword);
+  if (user.role !== "admin") throw AppError.forbidden();
+  const normalizedEmail = newEmail.trim().toLowerCase();
+  if (await User.exists({ email: normalizedEmail, _id: { $ne: userId } })) {
+    throw AppError.conflict("An account with this email already exists.");
+  }
+  user.email = normalizedEmail;
+  user.passwordHash = await hashPassword(newPassword);
+  try {
+    await user.save();
+  } catch (error) {
+    if (error?.code === 11000) throw AppError.conflict("An account with this email already exists.");
+    throw error;
+  }
+  await Session.updateMany({ user: userId, revokedAt: null, _id: { $ne: keepSessionId } }, { revokedAt: new Date(), revokedReason: "credentials_changed" });
+  return user;
+}
+
 /* ---------- Addresses ---------- */
 export async function addAddress(userId, data) {
   const user = await User.findById(userId);
