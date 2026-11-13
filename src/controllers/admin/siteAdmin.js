@@ -18,6 +18,10 @@ export async function dashboard(req, res) {
 
 /* ---------- Manage Site settings ---------- */
 const IMAGE_KEYS = ["logo", "footerLogo", "favicon", "headerLogo", "shareImage", "illustration"];
+const settingImageIds = (section, value) => imageIds(
+  ...IMAGE_KEYS.map((key) => value[key]),
+  ...(section === "homeCategories" ? [value.newInImage] : []),
+);
 
 export const allSettings = async (_req, res) => ok(res, await settings.getAllSettings());
 
@@ -27,9 +31,12 @@ export async function updateSettings(req, res) {
   const patch = settingsPatchSchema(section).parse(req.body);
   const current = await settings.getSection(section);
   for (const key of IMAGE_KEYS) if (patch[key] !== undefined) patch[key] = await resolveImageKeeping(patch[key], current[key]);
+  if (section === "homeCategories" && patch.newInImage !== undefined) {
+    patch.newInImage = await resolveImageKeeping(patch.newInImage, current.newInImage);
+  }
   const { value, previous } = await settings.updateSection(section, patch);
   await audit("settings.updated", { actor: req.auth.user._id, entity: "SiteSetting", entityId: section, ip: req.ip, meta: { fields: Object.keys(patch) } });
-  await releaseImages(imageIds(...IMAGE_KEYS.map((k) => previous[k])).filter((id) => !imageIds(...IMAGE_KEYS.map((k) => value[k])).includes(id)));
+  await releaseImages(settingImageIds(section, previous).filter((id) => !settingImageIds(section, value).includes(id)));
   ok(res, value);
 }
 
@@ -38,7 +45,7 @@ export async function resetSettings(req, res) {
   if (!SECTIONS.includes(section)) throw AppError.notFound("Unknown settings section.");
   const { value, previous } = await settings.resetSection(section);
   await audit("settings.reset", { actor: req.auth.user._id, entity: "SiteSetting", entityId: section, ip: req.ip });
-  await releaseImages(imageIds(...IMAGE_KEYS.map((k) => previous[k])));
+  await releaseImages(settingImageIds(section, previous));
   ok(res, value);
 }
 

@@ -3,7 +3,7 @@ import { SECTIONS } from "../validators/siteValidators.js";
 
 /* Defaults = what the live storefront shows today, so an unconfigured site looks unchanged. */
 export const DEFAULT_SETTINGS = {
-  homeCategories: { categories: [], showAllCategories: true, showNewIn: true, showDeals: true },
+  homeCategories: { categories: [], showAllCategories: true, showNewIn: true, showDeals: true, newInImage: null },
   general: {
     websiteName: "Shoponzy", tagline: "Shoes, sunglasses, perfumes, clothing, watches & essentials", websiteUrl: "https://shoponzy.in",
     currency: "INR", language: "English", productsPerPage: 24, gridColumns: 4, breadcrumbs: true, wishlist: true, comparison: false,

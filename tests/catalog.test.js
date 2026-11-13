@@ -221,6 +221,53 @@ describe("uploads (Cloudinary mocked)", () => {
     expect(destroyed).toEqual([up1.publicId]);
   });
 
+  it("saves category page banners and subcategory circle images", async () => {
+    const { destroyed } = mockCloudinary();
+    const upload = async (name) => (await admin.agent.post(`${API}/admin/uploads`).set("X-CSRF-Token", admin.token)
+      .field("kind", "category").attach("file", JPEG, name).expect(201)).body.data;
+    const banner = await upload("banner.jpg");
+    const explore = await upload("explore.jpg");
+    const circle = await upload("subcategory.jpg");
+    const shoes = (await admin.post("/admin/categories", {
+      name: "Shoes", slug: "shoes", bannerImage: banner, exploreImage: explore,
+    }).expect(201)).body.data;
+    const sneakers = (await admin.post("/admin/categories", {
+      name: "Sneakers", slug: "sneakers", parent: shoes.id, image: circle,
+    }).expect(201)).body.data;
+
+    expect(shoes.bannerImage.url).toBe(banner.url);
+    expect(shoes.exploreImage.url).toBe(explore.url);
+    expect(sneakers.image.url).toBe(circle.url);
+    const publicTree = (await request(app).get(`${API}/categories`).expect(200)).body.data;
+    expect(publicTree[0].bannerImage.url).toBe(banner.url);
+    expect(publicTree[0].exploreImage.url).toBe(explore.url);
+    expect(publicTree[0].children[0].image.url).toBe(circle.url);
+
+    await admin.patch(`/admin/categories/${shoes.id}`, { bannerImage: null, exploreImage: null }).expect(200);
+    expect(destroyed).toContain(banner.publicId);
+    expect(destroyed).toContain(explore.publicId);
+  });
+
+  it("saves and removes product images on child categories", async () => {
+    const { destroyed } = mockCloudinary();
+    const productImage = (await admin.agent.post(`${API}/admin/uploads`).set("X-CSRF-Token", admin.token)
+      .field("kind", "product").attach("file", JPEG, "child-product.jpg").expect(201)).body.data;
+    const shoes = (await admin.post("/admin/categories", { name: "Shoes", slug: "shoes" }).expect(201)).body.data;
+    const casual = (await admin.post("/admin/categories", {
+      name: "Casual", slug: "casual", parent: shoes.id,
+    }).expect(201)).body.data;
+    const child = (await admin.post("/admin/categories", {
+      name: "Loafers", slug: "loafers", parent: casual.id, productImage,
+    }).expect(201)).body.data;
+
+    expect(child.productImage.url).toBe(productImage.url);
+    const publicTree = (await request(app).get(`${API}/categories`).expect(200)).body.data;
+    expect(publicTree[0].children[0].children[0].productImage.url).toBe(productImage.url);
+
+    await admin.patch(`/admin/categories/${child.id}`, { productImage: null }).expect(200);
+    expect(destroyed).toContain(productImage.publicId);
+  });
+
   it("keeps an image that another record still uses", async () => {
     const { destroyed } = mockCloudinary();
     const up = (await admin.agent.post(`${API}/admin/uploads`).set("X-CSRF-Token", admin.token).field("kind", "category").attach("file", JPEG, "a.jpg").expect(201)).body.data;

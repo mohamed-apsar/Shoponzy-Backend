@@ -97,7 +97,7 @@ export const resolveImagesKeeping = (refs = [], existing = []) => Promise.all(re
 /* Is any document still pointing at this Cloudinary asset? */
 export async function isReferenced(publicId) {
   const checks = await Promise.all([
-    Category.exists({ "image.publicId": publicId }),
+    Category.exists({ $or: [{ "image.publicId": publicId }, { "productImage.publicId": publicId }, { "exploreImage.publicId": publicId }, { "bannerImage.publicId": publicId }] }),
     Product.exists({ "images.publicId": publicId }),
     Banner.exists({ $or: [{ "image.publicId": publicId }, { "mobileImage.publicId": publicId }] }),
     Popup.exists({ "image.publicId": publicId }),

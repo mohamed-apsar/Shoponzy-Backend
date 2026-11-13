@@ -53,6 +53,21 @@ describe("Manage Site settings", () => {
     await admin.patch("/admin/site-settings/branding", { logo: b }).expect(200);
     expect(destroyed).toEqual([a.publicId]);
   });
+
+  it("saves the New In circular image and releases it when removed", async () => {
+    const { destroyed } = mockCloudinary();
+    const png = Buffer.concat([Buffer.from("89504e470d0a1a0a0000000d", "hex"), Buffer.alloc(64)]);
+    const upload = async () => (await admin.agent.post(`${API}/admin/uploads`).set("X-CSRF-Token", admin.token)
+      .field("kind", "category").attach("file", png, "new-in.png").expect(201)).body.data;
+    const image = await upload();
+
+    await admin.patch("/admin/site-settings/homeCategories", { newInImage: image }).expect(200);
+    expect((await pub("/site-settings").expect(200)).body.data.homeCategories.newInImage.url).toBe(image.url);
+
+    await admin.patch("/admin/site-settings/homeCategories", { newInImage: null }).expect(200);
+    expect((await pub("/site-settings").expect(200)).body.data.homeCategories.newInImage).toBeNull();
+    expect(destroyed).toEqual([image.publicId]);
+  });
 });
 
 describe("banners, homepage sections, popups and pages", () => {
@@ -143,6 +158,10 @@ describe("contact, newsletter, SEO", () => {
     }).expect(200);
     const settings = (await pub("/site-settings").expect(200)).body.data.seo;
     expect(settings).toMatchObject({ googleVerification: "google-id", robotsMeta: "noindex, follow" });
+    const extendedRobots = "index, nofollow, noarchive, noimageindex, nosnippet, max-snippet:120, max-video-preview:0, max-image-preview:large";
+    await admin.patch("/admin/site-settings/seo", { robotsMeta: extendedRobots }).expect(200);
+    expect((await pub("/site-settings").expect(200)).body.data.seo.robotsMeta).toBe(extendedRobots);
+    await admin.patch("/admin/site-settings/seo", { robotsMeta: "index, follow, invalid-directive" }).expect(400);
     expect(settings.sitemapXml).toBeUndefined();
     expect((await pub("/seo/robots.txt").expect(200)).text).toBe("User-agent: *\nDisallow: /private\n");
     expect((await pub("/seo/sitemap.xml").expect(200)).text).toBe(sitemapXml);
