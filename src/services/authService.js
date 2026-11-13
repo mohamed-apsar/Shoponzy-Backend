@@ -49,10 +49,13 @@ export async function login({ email, password }, audience, ctx) {
   if (user.status !== "active") throw AppError.forbidden("This account has been disabled. Please contact support.");
   if (audience === "admin" && user.role !== "admin") throw AppError.unauthorized(INVALID_LOGIN);
 
+  // Independent writes run together: each is a database round trip.
   user.lastLoginAt = new Date();
-  await user.save();
-  const tokens = await startSession(user, audience, ctx);
-  if (audience === "admin") await audit("auth.admin_login", { actor: user._id, ip: ctx.ip });
+  const [tokens] = await Promise.all([
+    startSession(user, audience, ctx),
+    User.updateOne({ _id: user._id }, { $set: { lastLoginAt: user.lastLoginAt } }),
+    audience === "admin" ? audit("auth.admin_login", { actor: user._id, ip: ctx.ip }) : null,
+  ]);
   return { user, tokens };
 }
 

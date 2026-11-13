@@ -149,17 +149,19 @@ export async function isReferenced(publicId) {
 /* Deletes assets that are no longer referenced. Failures are logged, never thrown: the
    entity change has already succeeded, and the orphan sweep will retry later. */
 export async function releaseImages(publicIds) {
-  for (const publicId of new Set(publicIds.filter(Boolean))) {
+  const release = async (publicId) => {
     try {
-      if (await isReferenced(publicId)) continue;
-      if (await Upload.exists({ publicId })) {
-        await getClient().destroy(publicId);
-        await Upload.deleteOne({ publicId });
-      }
+      const [referenced, uploaded] = await Promise.all([isReferenced(publicId), Upload.exists({ publicId })]);
+      if (referenced || !uploaded) return;
+      await getClient().destroy(publicId);
+      await Upload.deleteOne({ publicId });
     } catch (err) {
       logger.warn({ publicId, err: err?.message }, "Could not delete unreferenced image; will retry in cleanup");
     }
-  }
+  };
+  // A few at a time: each check is several database round trips, and a save can release many images.
+  const ids = [...new Set(publicIds.filter(Boolean))];
+  for (let i = 0; i < ids.length; i += 5) await Promise.all(ids.slice(i, i + 5).map(release));
 }
 
 /* Uploads never attached to anything within `olderThanMs` are removed (abandoned forms). */
