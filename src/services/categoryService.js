@@ -3,6 +3,16 @@ import { Product } from "../models/Product.js";
 import { AppError } from "../utils/AppError.js";
 import { imageIds, releaseImages, resolveImage, resolveImageKeeping } from "./uploadService.js";
 
+const GALLERY_SLOTS = ["image1", "image2", "image3"];
+const plain = (img) => img?.toObject?.() ?? img ?? null;
+const galleryImages = (cat) => GALLERY_SLOTS.map((slot) => cat.images?.[slot]).filter(Boolean);
+
+async function resolveGallery(images = {}) {
+  const out = {};
+  for (const slot of GALLERY_SLOTS) out[slot] = await resolveImage(images[slot]);
+  return out;
+}
+
 async function loadParent(parentId) {
   if (!parentId) return null;
   const parent = await Category.findById(parentId);
@@ -33,6 +43,7 @@ export async function createCategory(data) {
     productImage: await resolveImage(data.productImage),
     exploreImage: await resolveImage(data.exploreImage),
     bannerImage: await resolveImage(data.bannerImage),
+    images: await resolveGallery(data.images),
   });
 }
 
@@ -76,8 +87,17 @@ export async function updateCategory(id, data) {
     Object.assign(cat, place, { slug });
   }
 
-  const { parent: _p, slug: _s, image, productImage, exploreImage, bannerImage, ...rest } = data;
+  const { parent: _p, slug: _s, image, productImage, exploreImage, bannerImage, images, ...rest } = data;
   Object.assign(cat, rest);
+  // Only the slots present in the request change; the others keep their stored image.
+  const replacedGallery = [];
+  for (const slot of GALLERY_SLOTS) {
+    if (images?.[slot] === undefined) continue;
+    const old = plain(cat.images?.[slot]);
+    const next = await resolveImageKeeping(images[slot], old);
+    cat.set(`images.${slot}`, next);
+    if (old?.publicId && old.publicId !== next?.publicId) replacedGallery.push(old);
+  }
   if (image !== undefined) cat.image = await resolveImageKeeping(image, cat.image?.toObject?.() ?? cat.image);
   if (productImage !== undefined) cat.productImage = await resolveImageKeeping(productImage, cat.productImage?.toObject?.() ?? cat.productImage);
   if (exploreImage !== undefined) cat.exploreImage = await resolveImageKeeping(exploreImage, cat.exploreImage?.toObject?.() ?? cat.exploreImage);
@@ -88,6 +108,7 @@ export async function updateCategory(id, data) {
   if (productImage !== undefined && oldProductImage?.publicId !== cat.productImage?.publicId) await releaseImages(imageIds(oldProductImage));
   if (exploreImage !== undefined && oldExploreImage?.publicId !== cat.exploreImage?.publicId) await releaseImages(imageIds(oldExploreImage));
   if (bannerImage !== undefined && oldBannerImage?.publicId !== cat.bannerImage?.publicId) await releaseImages(imageIds(oldBannerImage));
+  if (replacedGallery.length) await releaseImages(imageIds(replacedGallery));
   return cat;
 }
 
@@ -100,7 +121,7 @@ export async function deleteCategory(id) {
   if (products) throw AppError.conflict(`${products} product${products === 1 ? " is" : "s are"} still in this category. Move or archive them first.`);
   await Product.updateMany({ categoryPath: cat._id }, { $pull: { categoryPath: cat._id } });
   await cat.deleteOne();
-  await releaseImages(imageIds(cat.image, cat.productImage, cat.exploreImage, cat.bannerImage));
+  await releaseImages(imageIds(cat.image, cat.productImage, cat.exploreImage, cat.bannerImage, galleryImages(cat)));
 }
 
 /* Ids of disabled categories and everything below them: their products are hidden from the storefront. */
@@ -124,6 +145,7 @@ export async function publicTree() {
 
 export const publicCategory = (c) => ({
   id: String(c._id), name: c.name, slug: c.slug, path: c.path, level: c.level, parent: c.parent ? String(c.parent) : null,
-  description: c.description, image: c.image, productImage: c.productImage, exploreImage: c.exploreImage, bannerImage: c.bannerImage, order: c.order, seo: c.seo, display: c.display,
+  description: c.description, image: c.image, productImage: c.productImage, exploreImage: c.exploreImage, bannerImage: c.bannerImage,
+  images: { image1: c.images?.image1 || null, image2: c.images?.image2 || null, image3: c.images?.image3 || null }, order: c.order, seo: c.seo, display: c.display,
   comingSoon: Boolean(c.comingSoon),
 });

@@ -27,6 +27,8 @@ const categoryBase = {
   productImage: imageRef.optional(),
   exploreImage: imageRef.optional(),
   bannerImage: imageRef.optional(),
+  // Slots are independent: an omitted slot keeps its stored image, null removes it.
+  images: z.object({ image1: imageRef.optional(), image2: imageRef.optional(), image3: imageRef.optional() }).strict().optional(),
   order: z.coerce.number().int().min(0).max(10_000).optional(),
   status: z.enum(["enabled", "disabled"]).optional(),
   comingSoon: z.boolean().optional(),

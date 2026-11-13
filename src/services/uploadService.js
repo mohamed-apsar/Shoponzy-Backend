@@ -11,7 +11,8 @@ import { logger } from "../utils/logger.js";
    Cloudinary creates a folder on the first upload into it, so these paths are the structure:
 
    shoponzy/products/{product-images,product-gallery,product-variants}
-   shoponzy/categories/{category-images,category-banners}
+   shoponzy/categories/{category-images,category-banners,subcategory-banners}
+   shoponzy/categories/subcategory-images/{image-1,image-2,image-3}
    shoponzy/banners/{desktop,mobile}      shoponzy/branding/{logos,favicons}
    shoponzy/popups   shoponzy/seo   shoponzy/site/{maintenance,general}   shoponzy/returns/return-evidence
 
@@ -26,6 +27,10 @@ export const UPLOAD_KINDS = {
   productVariant: { folder: "products/product-variants", maxBytes: 5 * MB },
   category: { folder: "categories/category-images", maxBytes: 5 * MB },
   categoryBanner: { folder: "categories/category-banners", maxBytes: 8 * MB },
+  subcategoryImage1: { folder: "categories/subcategory-images/image-1", maxBytes: 5 * MB },
+  subcategoryImage2: { folder: "categories/subcategory-images/image-2", maxBytes: 5 * MB },
+  subcategoryImage3: { folder: "categories/subcategory-images/image-3", maxBytes: 5 * MB },
+  subcategoryBanner: { folder: "categories/subcategory-banners", maxBytes: 8 * MB },
   banner: { folder: "banners/desktop", maxBytes: 8 * MB },
   bannerMobile: { folder: "banners/mobile", maxBytes: 8 * MB },
   logo: { folder: "branding/logos", maxBytes: 2 * MB },
@@ -118,7 +123,8 @@ export const resolveImagesKeeping = (refs = [], existing = []) => Promise.all(re
 /* Is any document still pointing at this Cloudinary asset? */
 export async function isReferenced(publicId) {
   const checks = await Promise.all([
-    Category.exists({ $or: [{ "image.publicId": publicId }, { "productImage.publicId": publicId }, { "exploreImage.publicId": publicId }, { "bannerImage.publicId": publicId }] }),
+    Category.exists({ $or: [{ "image.publicId": publicId }, { "productImage.publicId": publicId }, { "exploreImage.publicId": publicId }, { "bannerImage.publicId": publicId },
+      { "images.image1.publicId": publicId }, { "images.image2.publicId": publicId }, { "images.image3.publicId": publicId }] }),
     Product.exists({ $or: [
       { "images.publicId": publicId },
       { "colors.featuredImage.publicId": publicId },

@@ -19,6 +19,12 @@ const categorySchema = new mongoose.Schema({
   productImage: { type: imageSchema, default: null },
   exploreImage: { type: imageSchema, default: null },
   bannerImage: { type: imageSchema, default: null },
+  // Subcategory gallery: three independent 2:3 slots. A subcategory's banner is bannerImage (16:5 for subcategories).
+  images: {
+    image1: { type: imageSchema, default: null },
+    image2: { type: imageSchema, default: null },
+    image3: { type: imageSchema, default: null },
+  },
   order: { type: Number, default: 0 },
   status: { type: String, enum: ["enabled", "disabled"], default: "enabled", index: true },
   comingSoon: { type: Boolean, default: false },

@@ -19,6 +19,10 @@ describe("Cloudinary folder structure", () => {
       productVariant: "shoponzy/products/product-variants",
       category: "shoponzy/categories/category-images",
       categoryBanner: "shoponzy/categories/category-banners",
+      subcategoryImage1: "shoponzy/categories/subcategory-images/image-1",
+      subcategoryImage2: "shoponzy/categories/subcategory-images/image-2",
+      subcategoryImage3: "shoponzy/categories/subcategory-images/image-3",
+      subcategoryBanner: "shoponzy/categories/subcategory-banners",
       banner: "shoponzy/banners/desktop",
       bannerMobile: "shoponzy/banners/mobile",
       logo: "shoponzy/branding/logos",
@@ -28,6 +32,7 @@ describe("Cloudinary folder structure", () => {
       maintenance: "shoponzy/site/maintenance",
       site: "shoponzy/site/general",
       returnEvidence: "shoponzy/returns/return-evidence",
+      supportTicket: "shoponzy/support/tickets",
     });
   });
 

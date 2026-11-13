@@ -359,6 +359,52 @@ describe("uploads (Cloudinary mocked)", () => {
     expect(destroyed).toContain(explore.publicId);
   });
 
+  it("keeps three subcategory gallery images and a banner independent per subcategory", async () => {
+    const { destroyed } = mockCloudinary();
+    const upload = async (kind) => (await admin.agent.post(`${API}/admin/uploads`).set("X-CSRF-Token", admin.token)
+      .field("kind", kind).attach("file", JPEG, "a.jpg").expect(201)).body.data;
+    const [img1, img2, img3, banner] = [await upload("subcategoryImage1"), await upload("subcategoryImage2"), await upload("subcategoryImage3"), await upload("subcategoryBanner")];
+    expect(img1.publicId).toMatch(/^shoponzy\/categories\/subcategory-images\/image-1\//);
+    expect(img3.publicId).toMatch(/^shoponzy\/categories\/subcategory-images\/image-3\//);
+    expect(banner.publicId).toMatch(/^shoponzy\/categories\/subcategory-banners\//);
+
+    const shoes = (await admin.post("/admin/categories", { name: "Shoes", slug: "shoes" }).expect(201)).body.data;
+    const sneakers = (await admin.post("/admin/categories", {
+      name: "Sneakers", slug: "sneakers", parent: shoes.id, bannerImage: banner, images: { image1: img1, image2: img2, image3: img3 },
+    }).expect(201)).body.data;
+    const slides = (await admin.post("/admin/categories", { name: "Slides", slug: "slides", parent: shoes.id }).expect(201)).body.data;
+    expect(sneakers.images.image2.url).toBe(img2.url);
+    expect(slides.images).toEqual({ image1: null, image2: null, image3: null });
+
+    // Replacing slot 2 leaves slots 1 and 3 and the banner untouched; only the old slot-2 asset is released.
+    const img2b = await upload("subcategoryImage2");
+    const patched = (await admin.patch(`/admin/categories/${sneakers.id}`, { images: { image2: img2b } }).expect(200)).body.data;
+    expect(patched.images.image1.url).toBe(img1.url);
+    expect(patched.images.image2.url).toBe(img2b.url);
+    expect(patched.images.image3.url).toBe(img3.url);
+    expect(patched.bannerImage.url).toBe(banner.url);
+    expect(destroyed).toEqual([img2.publicId]);
+
+    // Removing slot 3 only.
+    const removed = (await admin.patch(`/admin/categories/${sneakers.id}`, { images: { image3: null } }).expect(200)).body.data;
+    expect(removed.images.image3).toBeNull();
+    expect(removed.images.image1.url).toBe(img1.url);
+    expect(destroyed).toEqual([img2.publicId, img3.publicId]);
+
+    const tree = (await request(app).get(`${API}/categories`).expect(200)).body.data;
+    const subs = tree.find((c) => c.slug === "shoes").children;
+    const servedSneakers = subs.find((c) => c.slug === "sneakers");
+    expect(servedSneakers.images.image1.url).toBe(img1.url);
+    expect(servedSneakers.images.image3).toBeNull();
+    expect(servedSneakers.bannerImage.url).toBe(banner.url);
+    expect(subs.find((c) => c.slug === "slides").bannerImage).toBeNull();
+
+    await admin.post("/admin/categories", { name: "X", slug: "x", images: { image4: img1 } }).expect(400);
+
+    await admin.del(`/admin/categories/${sneakers.id}`).expect(200);
+    expect(destroyed).toEqual(expect.arrayContaining([img1.publicId, img2b.publicId, banner.publicId]));
+  });
+
   it("stores, serves, replaces, and deletes a category Shop all background image", async () => {
     const { destroyed } = mockCloudinary();
     const upload = (file, name) => admin.agent.post(`${API}/admin/uploads`)
