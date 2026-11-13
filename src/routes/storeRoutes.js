@@ -4,14 +4,18 @@ import * as site from "../controllers/siteController.js";
 import * as cart from "../controllers/cartController.js";
 import * as orders from "../controllers/orderController.js";
 import * as account from "../controllers/accountController.js";
+import * as returns from "../controllers/returnController.js";
+import multer from "multer";
+import { UPLOAD_KINDS } from "../services/uploadService.js";
+import { createReturnSchema } from "../validators/returnValidators.js";
 import { authenticate, optionalAuth } from "../middleware/auth.js";
 import { cartOwner } from "../middleware/cartOwner.js";
 import { validate } from "../middleware/validate.js";
-import { formLimiter, checkoutLimiter, trackLimiter, loginIpLimiter } from "../middleware/rateLimits.js";
+import { formLimiter, checkoutLimiter, trackLimiter, loginIpLimiter, returnUploadLimiter } from "../middleware/rateLimits.js";
 import { idsQuery, publicProductsQuery } from "../validators/catalogValidators.js";
 import { contactSchema, newsletterSchema, notFoundTrackSchema } from "../validators/contentValidators.js";
 import { addCartItemSchema, addressSchema, cancelSchema, checkoutSchema, couponSchema, myOrdersQuery, trackOrderSchema, updateCartItemSchema, verifyPaymentSchema } from "../validators/commerceValidators.js";
-import { changePasswordSchema, deleteAccountSchema, forgotPasswordSchema, profileSchema, resetPasswordSchema, wishlistAddSchema, wishlistMergeSchema } from "../validators/accountValidators.js";
+import { changePasswordSchema, createSupportTicketSchema, deleteAccountSchema, forgotPasswordSchema, profileSchema, resetPasswordSchema, wishlistAddSchema, wishlistMergeSchema } from "../validators/accountValidators.js";
 import { objectId } from "../validators/common.js";
 import { z } from "zod";
 
@@ -37,6 +41,9 @@ r.get("/seo/robots.txt", site.robots);
 r.post("/seo/404", validate({ body: notFoundTrackSchema }), site.trackNotFound);
 r.post("/contact", formLimiter, optionalAuth("customer"), validate({ body: contactSchema }), site.contact);
 r.post("/newsletter", formLimiter, validate({ body: newsletterSchema }), site.newsletter);
+r.get("/newsletter/unsubscribe", site.unsubscribePage);
+r.post("/newsletter/unsubscribe", formLimiter, site.unsubscribe);
+r.get("/faqs", site.faqs);
 
 /* ---------- Cart (guests and customers) ---------- */
 r.get("/cart", optionalAuth("customer"), cartOwner(), cart.getCart);
@@ -44,6 +51,7 @@ r.get("/cart", optionalAuth("customer"), cartOwner(), cart.getCart);
 r.post("/cart/items", validate({ body: addCartItemSchema }), optionalAuth("customer"), cartOwner({ create: true }), cart.addItem);
 r.patch("/cart/items/:itemId", idParam("itemId"), validate({ body: updateCartItemSchema }), optionalAuth("customer"), cartOwner(), cart.updateItem);
 r.delete("/cart/items/:itemId", idParam("itemId"), optionalAuth("customer"), cartOwner(), cart.removeItem);
+r.get("/coupons", cart.couponOffers);
 r.get("/coupons/:code", trackLimiter, validate({ params: z.object({ code: z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{3,30}$/, "Check the code.") }) }), cart.couponInfo);
 r.put("/cart/coupon",validate({ body: couponSchema }), optionalAuth("customer"), cartOwner({ create: true }), cart.setCoupon);
 
@@ -53,6 +61,12 @@ r.post("/orders/track", trackLimiter, validate({ body: trackOrderSchema }), orde
 r.get("/orders", authenticate("customer"), cartOwner(), validate({ query: myOrdersQuery }), orders.myOrders);
 r.get("/orders/:orderNumber", optionalAuth("customer"), cartOwner(), orders.myOrder);
 r.post("/orders/:orderNumber/cancel", optionalAuth("customer"), cartOwner(), validate({ body: cancelSchema }), orders.cancelMyOrder);
+/* ---------- Returns (own orders: signed-in customer, or the guest browser that ordered) ---------- */
+const evidenceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: UPLOAD_KINDS.returnEvidence.maxBytes, files: 1, fields: 2 } });
+r.get("/orders/:orderNumber/returns", optionalAuth("customer"), cartOwner(), returns.orderReturns);
+r.post("/orders/:orderNumber/returns", formLimiter, optionalAuth("customer"), cartOwner(), validate({ body: createReturnSchema }), returns.requestReturn);
+r.post("/returns/uploads", returnUploadLimiter, optionalAuth("customer"), cartOwner(), evidenceUpload.single("file"), returns.uploadEvidence);
+r.post("/returns/:returnNumber/cancel", optionalAuth("customer"), cartOwner(), returns.cancelReturn);
 r.post("/payments/razorpay/verify", checkoutLimiter, validate({ body: verifyPaymentSchema }), orders.verifyRazorpay);
 r.post("/payments/webhook", orders.razorpayWebhook);
 
@@ -63,6 +77,7 @@ r.post("/auth/reset-password", loginIpLimiter, validate({ body: resetPasswordSch
 /* ---------- Account (signed-in customers) ---------- */
 const acct = Router();
 acct.use(authenticate("customer"));
+const supportTicketUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: UPLOAD_KINDS.supportTicket.maxBytes, files: 1, fields: 1 } });
 acct.patch("/profile", validate({ body: profileSchema }), account.updateProfile);
 acct.post("/password", loginIpLimiter, validate({ body: changePasswordSchema }), account.changePassword);
 acct.post("/delete", loginIpLimiter, validate({ body: deleteAccountSchema }), account.deleteAccount);
@@ -74,6 +89,9 @@ acct.get("/wishlist", account.wishlist);
 acct.post("/wishlist", validate({ body: wishlistAddSchema }), account.addToWishlist);
 acct.post("/wishlist/merge", validate({ body: wishlistMergeSchema }), account.mergeWishlist);
 acct.delete("/wishlist/:productId", idParam("productId"), account.removeFromWishlist);
+acct.get("/tickets", account.supportTickets);
+acct.post("/tickets", formLimiter, validate({ body: createSupportTicketSchema }), account.createSupportTicket);
+acct.post("/tickets/attachment", returnUploadLimiter, supportTicketUpload.single("file"), account.uploadSupportTicketAttachment);
 r.use("/account", acct);
 
 export default r;

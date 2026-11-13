@@ -102,18 +102,32 @@ notFoundLogSchema.index({ hits: -1, lastHitAt: -1 });
 toJSONPlugin(notFoundLogSchema);
 export const NotFoundLog = mongoose.model("NotFoundLog", notFoundLogSchema);
 
-/* ---------- Contact messages & newsletter ---------- */
+/* ---------- Contact messages (Help & Support) & newsletter ---------- */
+export const CONTACT_STATUSES = ["new", "read", "replied", "closed"];
 const contactMessageSchema = new mongoose.Schema({
   name: { type: String, required: true, maxlength: 100 },
   phone: { type: String, required: true },
   email: String,
+  kind: { type: String, enum: ["contact", "ticket"], default: "contact", index: true },
+  subject: { type: String, maxlength: 120 },
+  type: { type: String, maxlength: 60 },
+  priority: { type: String, enum: ["low", "medium", "high"] },
+  attachment: { url: String, publicId: String, filename: String },
   topic: { type: String, maxlength: 60 },
   orderNumber: { type: String, maxlength: 20 },
   message: { type: String, required: true, maxlength: 3000 },
   user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-  status: { type: String, enum: ["new", "read", "closed"], default: "new", index: true },
+  // new → open (read) → replied → closed. "read" is the stored value for "open" (kept for existing data).
+  status: { type: String, enum: CONTACT_STATUSES, default: "new", index: true },
+  replies: [{
+    message: { type: String, maxlength: 5000 }, by: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    at: { type: Date, default: Date.now }, emailed: { type: Boolean, default: false }, emailError: String, _id: false,
+  }],
+  notes: [{ note: { type: String, maxlength: 2000 }, by: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, at: { type: Date, default: Date.now }, _id: false }],
+  lastReplyAt: Date,
 }, { timestamps: true });
 contactMessageSchema.index({ createdAt: -1 });
+contactMessageSchema.index({ user: 1, kind: 1, createdAt: -1 });
 toJSONPlugin(contactMessageSchema);
 export const ContactMessage = mongoose.model("ContactMessage", contactMessageSchema);
 
@@ -124,3 +138,15 @@ const newsletterSchema = new mongoose.Schema({
 }, { timestamps: true });
 toJSONPlugin(newsletterSchema);
 export const NewsletterSubscriber = mongoose.model("NewsletterSubscriber", newsletterSchema);
+
+/* ---------- FAQs (shown on the storefront Help page) ---------- */
+const faqSchema = new mongoose.Schema({
+  question: { type: String, required: true, trim: true, maxlength: 300 },
+  answer: { type: String, required: true, trim: true, maxlength: 5000 },
+  category: { type: String, trim: true, maxlength: 60, default: "General" },
+  order: { type: Number, default: 0 },
+  status: { type: String, enum: ["active", "hidden"], default: "active", index: true },
+}, { timestamps: true });
+faqSchema.index({ order: 1, createdAt: 1 });
+toJSONPlugin(faqSchema);
+export const Faq = mongoose.model("Faq", faqSchema);

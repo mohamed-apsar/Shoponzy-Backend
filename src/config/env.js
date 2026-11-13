@@ -14,12 +14,15 @@ const schema = z.object({
 
   CLIENT_URL: z.string().url().default(process.env.NODE_ENV === "production" ? "https://shoponzy-user-site.vercel.app" : "http://localhost:5173"),
   ADMIN_URL: z.string().url().default(process.env.NODE_ENV === "production" ? "https://shoponzy-admin.vercel.app" : "http://127.0.0.1:5176"),
+  // Public URL of this API including /api/v1 (used in email unsubscribe links). Defaults to the request host.
+  PUBLIC_API_URL: z.string().url().optional().or(z.literal("").transform(() => undefined)),
   // Extra comma-separated origins allowed by CORS (e.g. a staging domain).
   CORS_EXTRA_ORIGINS: z.string().default(""),
 
   JWT_SECRET: isTest ? z.string().default("test-secret-test-secret-test-secret-0000") : z.string().min(32, "JWT_SECRET must be at least 32 characters"),
   ACCESS_TOKEN_TTL_MIN: z.coerce.number().int().positive().default(15),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  ADMIN_REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(90),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(isTest ? 4 : 12),
 
   COOKIE_SECURE: z.enum(["true", "false"]).default(String(secureCookies)).transform((v) => isVercel || v === "true"),

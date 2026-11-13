@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import request from "supertest";
 import { API, app, browser, useDb } from "./helpers.js";
 import { ADDRESS, CONTACT, adminBrowser, customerBrowser, key, mockMail, simpleProduct, sneaker, variantOf } from "./fixtures.js";
@@ -124,7 +124,7 @@ describe("checkout (COD)", () => {
     expect(await InventoryMovement.findOne({ reason: "order" })).toMatchObject({ delta: -2 });
     expect(await Payment.findOne({ provider: "cod" })).toMatchObject({ amount: 2000, status: "pending" });
     expect((await b.get("/cart").expect(200)).body.data.lines).toEqual([]);
-    expect(sent[0]).toMatchObject({ to: "asha@example.com", subject: "Order SZ100001 confirmed" });
+    await vi.waitFor(() => expect(sent[0]).toMatchObject({ to: "asha@example.com", subject: "Order SZ100001 confirmed" }));
 
     // Later price edits don't change the order.
     await Product.updateOne({ _id: s._id }, { $set: { "variants.$[].price": 5000, name: "Renamed" } });
@@ -264,7 +264,8 @@ describe("order access, tracking and cancellation", () => {
     const shipped = await admin.patch(`/admin/orders/${id}/status`, { status: "shipped", fulfilment: { courier: "Delhivery", trackingNumber: "DLV123", trackingUrl: "https://track.example/DLV123" } }).expect(200);
     expect(shipped.body.data.order.fulfilment).toMatchObject({ courier: "Delhivery", trackingNumber: "DLV123" });
     expect(shipped.body.data.allowedTransitions).toEqual(["delivered", "returned"]);
-    expect(sent.some((m) => m.subject === `Order ${order.orderNumber}: shipped` && m.text.includes("https://track.example/DLV123"))).toBe(true);
+    // Order emails are sent in the background (after the email-switch setting is read), so wait for it.
+    await vi.waitFor(() => expect(sent.some((m) => m.subject === `Order ${order.orderNumber}: shipped` && m.text.includes("https://track.example/DLV123"))).toBe(true));
     await admin.post(`/admin/orders/${id}/cancel`, {}).expect(409); // can't cancel once shipped
     const delivered = (await admin.patch(`/admin/orders/${id}/status`, { status: "delivered" }).expect(200)).body.data.order;
     expect(delivered.paymentStatus).toBe("paid");

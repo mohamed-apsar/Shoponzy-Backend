@@ -1,24 +1,45 @@
 import { v2 as cloudinarySdk } from "cloudinary";
 import { cloudinaryConfigured, env } from "../config/env.js";
-import { Upload } from "../models/commerce.js";
+import { ReturnRequest, Upload } from "../models/commerce.js";
 import { Category } from "../models/Category.js";
 import { Product } from "../models/Product.js";
 import { Banner, Popup, SiteSetting } from "../models/site.js";
 import { AppError } from "../utils/AppError.js";
 import { logger } from "../utils/logger.js";
 
-/* What may be uploaded, where it goes, and how big it may be. SVG is never accepted (it can carry scripts). */
+/* All Shoponzy media lives under one Cloudinary root; each upload kind has its own sub-folder.
+   Cloudinary creates a folder on the first upload into it, so these paths are the structure:
+
+   shoponzy/products/{product-images,product-gallery,product-variants}
+   shoponzy/categories/{category-images,category-banners}
+   shoponzy/banners/{desktop,mobile}      shoponzy/branding/{logos,favicons}
+   shoponzy/popups   shoponzy/seo   shoponzy/site/{maintenance,general}   shoponzy/returns/return-evidence
+
+   Assets uploaded before this layout keep their original public ids (the id embeds the folder), so
+   existing references stay valid. What may be uploaded and how big it may be is set per kind.
+   SVG is never accepted (it can carry scripts). */
+export const CLOUDINARY_ROOT = "shoponzy";
+const MB = 1024 * 1024;
 export const UPLOAD_KINDS = {
-  product: { folder: "products", maxBytes: 5 * 1024 * 1024 },
-  category: { folder: "categories", maxBytes: 5 * 1024 * 1024 },
-  banner: { folder: "banners", maxBytes: 8 * 1024 * 1024 },
-  logo: { folder: "branding", maxBytes: 2 * 1024 * 1024 },
-  favicon: { folder: "branding", maxBytes: 1024 * 1024, ico: true },
-  popup: { folder: "popups", maxBytes: 5 * 1024 * 1024 },
-  seo: { folder: "seo", maxBytes: 5 * 1024 * 1024 },
-  maintenance: { folder: "site", maxBytes: 5 * 1024 * 1024 },
+  product: { folder: "products/product-images", maxBytes: 5 * MB },
+  productGallery: { folder: "products/product-gallery", maxBytes: 5 * MB },
+  productVariant: { folder: "products/product-variants", maxBytes: 5 * MB },
+  category: { folder: "categories/category-images", maxBytes: 5 * MB },
+  categoryBanner: { folder: "categories/category-banners", maxBytes: 8 * MB },
+  banner: { folder: "banners/desktop", maxBytes: 8 * MB },
+  bannerMobile: { folder: "banners/mobile", maxBytes: 8 * MB },
+  logo: { folder: "branding/logos", maxBytes: 2 * MB },
+  favicon: { folder: "branding/favicons", maxBytes: MB, ico: true },
+  popup: { folder: "popups", maxBytes: 5 * MB },
+  seo: { folder: "seo", maxBytes: 5 * MB },
+  maintenance: { folder: "site/maintenance", maxBytes: 5 * MB },
+  site: { folder: "site/general", maxBytes: 5 * MB },
+  // Photos customers attach to a return request (uploaded from the storefront, not the admin panel).
+  returnEvidence: { folder: "returns/return-evidence", maxBytes: 5 * MB },
+  supportTicket: { folder: "support/tickets", maxBytes: 5 * MB },
 };
-export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+export const uploadFolder = (kind) => `${CLOUDINARY_ROOT}/${UPLOAD_KINDS[kind].folder}`;
+export const MAX_UPLOAD_BYTES = 8 * MB;
 
 /* Identify the real file type from its first bytes; the browser-supplied MIME type is not trusted. */
 export function sniffImage(buf) {
@@ -59,7 +80,7 @@ export async function uploadImage({ buffer, size }, kind, user) {
   let result;
   try {
     result = await getClient().upload(buffer, {
-      folder: `shoponzy/${rule.folder}`, resource_type: "image", unique_filename: true, overwrite: false,
+      folder: uploadFolder(kind), resource_type: "image", unique_filename: true, overwrite: false,
       allowed_formats: ["jpg", "jpeg", "png", "webp", "gif", "avif", "ico"],
     });
   } catch (err) {
@@ -98,9 +119,17 @@ export const resolveImagesKeeping = (refs = [], existing = []) => Promise.all(re
 export async function isReferenced(publicId) {
   const checks = await Promise.all([
     Category.exists({ $or: [{ "image.publicId": publicId }, { "productImage.publicId": publicId }, { "exploreImage.publicId": publicId }, { "bannerImage.publicId": publicId }] }),
-    Product.exists({ "images.publicId": publicId }),
+    Product.exists({ $or: [
+      { "images.publicId": publicId },
+      { "colors.featuredImage.publicId": publicId },
+      { "colors.images.publicId": publicId },
+      { "contentBlocks.image.publicId": publicId },
+      { "contentBlocks.images.publicId": publicId },
+      { "seo.image.publicId": publicId },
+    ] }),
     Banner.exists({ $or: [{ "image.publicId": publicId }, { "mobileImage.publicId": publicId }] }),
     Popup.exists({ "image.publicId": publicId }),
+    ReturnRequest.exists({ "evidence.publicId": publicId }),
     // Settings are a handful of free-form documents (one per Manage Site section); scan them.
     SiteSetting.find().lean().then((docs) => docs.some((d) => JSON.stringify(d.value).includes(`"${publicId}"`))),
   ]);

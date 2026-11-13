@@ -1,10 +1,12 @@
-import { Order, Payment } from "../../models/commerce.js";
+import { Order, Payment, ReturnRequest } from "../../models/commerce.js";
 import { audit } from "../../models/AuditLog.js";
 import * as orders from "../../services/orderService.js";
 import { getSection } from "../../services/settingsService.js";
 import { AppError } from "../../utils/AppError.js";
 import { ok, paginate } from "../../utils/respond.js";
 import { escapeRegex } from "../../validators/common.js";
+import * as transactions from "../../services/transactionService.js";
+import { MAX_EXPORT_ROWS, csvDate, sendCsv } from "../../utils/csv.js";
 
 export async function listOrders(req, res) {
   const { q, status, paymentStatus, paymentMethod, attention, from, to, customer, ...pageQ } = req.valid.query;
@@ -36,8 +38,11 @@ async function loadOrder(id) {
 
 export async function getOrder(req, res) {
   const order = await loadOrder(req.params.id);
-  const payments = await Payment.find({ order: order._id }).sort({ createdAt: 1 });
-  ok(res, { order, payments, allowedTransitions: orders.TRANSITIONS[order.status] });
+  const [payments, returnRequests] = await Promise.all([
+    Payment.find({ order: order._id }).sort({ createdAt: 1 }),
+    ReturnRequest.find({ order: order._id }).sort({ createdAt: -1 }).select("returnNumber status refund.status refund.amount createdAt items.qty").lean(),
+  ]);
+  ok(res, { order, payments, returns: returnRequests.map((r) => ({ id: String(r._id), returnNumber: r.returnNumber, status: r.status, refundStatus: r.refund?.status, refundAmount: r.refund?.amount ?? null, quantity: r.items.reduce((s, i) => s + i.qty, 0), createdAt: r.createdAt })), allowedTransitions: orders.TRANSITIONS[order.status] });
 }
 
 export async function updateStatus(req, res) {
@@ -56,7 +61,7 @@ export async function updateFulfilment(req, res) {
 }
 
 export async function cancel(req, res) {
-  const order = await orders.cancelOrder(req.params.id, { reason: req.valid.body.reason || "Cancelled by store", by: req.auth.user._id });
+  const order = await orders.cancelOrder(req.params.id, { reason: req.valid.body.reason || "Cancelled by store", by: req.auth.user._id, force: req.valid.body.force });
   await audit("order.cancelled", { actor: req.auth.user._id, entity: "Order", entityId: order._id, ip: req.ip });
   ok(res, { order });
 }
@@ -85,23 +90,63 @@ ${row("Subtotal", m(order.subtotal))}${row(`Coupon ${e(order.couponCode)}`, orde
   res.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'").type("html").send(html);
 }
 
-/* ---------- Transactions ---------- */
+/* ---------- Transactions & payments ---------- */
 export async function listTransactions(req, res) {
-  const { status, provider, q, from, to, ...pageQ } = req.valid.query;
-  const filter = {};
-  if (status) filter.status = status;
-  if (provider) filter.provider = provider;
-  if (from || to) filter.createdAt = { ...(from ? { $gte: from } : {}), ...(to ? { $lte: to } : {}) };
-  if (q) {
-    const rx = new RegExp(escapeRegex(q), "i");
-    const matching = await Order.find({ orderNumber: rx }).select("_id").lean();
-    filter.$or = [{ providerPaymentId: rx }, { providerOrderId: rx }, { order: { $in: matching.map((o) => o._id) } }];
-  }
-  const { skip, limit, meta } = paginate(pageQ);
-  const [items, total, sums] = await Promise.all([
-    Payment.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).populate("order", "orderNumber contact.name total status"),
-    Payment.countDocuments(filter),
-    Payment.aggregate([{ $match: filter }, { $group: { _id: "$status", amount: { $sum: "$amount" }, refunded: { $sum: "$refundedAmount" }, n: { $sum: 1 } } }]),
+  const { skip, limit, meta } = paginate(req.valid.query);
+  const [{ items, total }, summary] = await Promise.all([
+    transactions.listTransactions(req.valid.query, { skip, limit }),
+    transactions.transactionSummary(req.valid.query),
   ]);
-  ok(res, items, { ...meta(total), totals: Object.fromEntries(sums.map((s) => [s._id, { count: s.n, amount: s.amount, refunded: s.refunded }])) });
+  ok(res, items, { ...meta(total), summary });
+}
+
+export const transactionSummary = async (req, res) => ok(res, await transactions.transactionSummary(req.valid.query));
+
+export async function getTransaction(req, res) {
+  const t = await transactions.getTransaction(req.params.id);
+  if (!t) throw AppError.notFound("Transaction not found.");
+  ok(res, t);
+}
+
+export async function exportTransactions(req, res) {
+  const rows = [["transaction_id", "razorpay_payment_id", "razorpay_order_id", "order_id", "customer", "customer_email", "amount", "currency", "payment_method", "payment_status", "refund_amount", "refund_status", "transaction_date"]];
+  for await (const p of await transactions.transactionsCursor(req.valid.query, MAX_EXPORT_ROWS)) {
+    const t = transactions.transactionView(p);
+    rows.push([t.id, t.razorpayPaymentId, t.razorpayOrderId, t.order?.orderNumber, t.customer?.name, t.customer?.email, t.amount, t.currency,
+      t.method, t.status, t.refundedAmount, t.refundStatus || "", csvDate(t.createdAt)]);
+  }
+  await audit("transactions.exported", { actor: req.auth.user._id, entity: "Payment", ip: req.ip, meta: { rows: rows.length - 1, filters: req.valid.query } });
+  sendCsv(res, `shoponzy-transactions-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+}
+
+export async function listRefunds(req, res) {
+  const { skip, limit, meta } = paginate(req.valid.query);
+  const { items, total } = await transactions.listRefunds(req.valid.query, { skip, limit });
+  ok(res, items, meta(total));
+}
+
+export async function syncRefund(req, res) {
+  const result = await orders.syncRefund(req.params.id, req.params.refundId);
+  await audit("refund.synced", { actor: req.auth.user._id, entity: "Payment", entityId: req.params.id, ip: req.ip, meta: { refundId: req.params.refundId, ...result } });
+  ok(res, { ...result, transaction: await transactions.getTransaction(req.params.id) });
+}
+
+export async function exportRefunds(req, res) {
+  const { items } = await transactions.listRefunds(req.valid.query, { skip: 0, limit: MAX_EXPORT_ROWS });
+  const rows = [["refund_id", "transaction_id", "razorpay_payment_id", "order_id", "customer", "customer_email", "amount", "refund_status", "manual_cod", "initiated_at", "completed_at", "failed_at", "failure_reason", "reason", "issued_by", "return_id"]];
+  for (const r of items) {
+    rows.push([r.refundId, r.transactionId, r.razorpayPaymentId, r.order?.orderNumber, r.customer?.name, r.customer?.email, r.amount, r.status, r.manual ? "yes" : "no",
+      csvDate(r.initiatedAt), csvDate(r.processedAt), csvDate(r.failedAt), r.failureReason, r.reason, r.by?.name, r.returnRequest?.returnNumber]);
+  }
+  await audit("refunds.exported", { actor: req.auth.user._id, entity: "Payment", ip: req.ip, meta: { rows: items.length, filters: req.valid.query } });
+  sendCsv(res, `shoponzy-refunds-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+}
+
+/* Payment method breakdown (same scope as the Payment Methods page). */
+export async function exportMethods(req, res) {
+  const { byMethod } = await transactions.transactionSummary(req.valid.query);
+  const rows = [["payment_method", "transactions", "successful", "failed", "success_rate_pct", "amount_received", "amount_refunded"]];
+  for (const m of byMethod) rows.push([m.method === "unknown" ? "not chosen yet" : m.method, m.total, m.successful, m.failed, m.successRate ?? "", m.amount, m.refunded]);
+  await audit("transactions.methods_exported", { actor: req.auth.user._id, entity: "Payment", ip: req.ip, meta: { filters: req.valid.query } });
+  sendCsv(res, `shoponzy-payment-methods-${new Date().toISOString().slice(0, 10)}.csv`, rows);
 }

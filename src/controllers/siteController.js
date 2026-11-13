@@ -1,5 +1,9 @@
 import { env } from "../config/env.js";
 import { Page, ContactMessage, NewsletterSubscriber, NotFoundLog } from "../models/site.js";
+import { Faq } from "../models/site.js";
+import { supportAckEmail, trySendMail } from "../services/emailService.js";
+import { getSection } from "../services/settingsService.js";
+import { verifyUnsubscribe } from "../services/campaignService.js";
 import { Product } from "../models/Product.js";
 import { Category } from "../models/Category.js";
 import { getAllSettings, publicSettings } from "../services/settingsService.js";
@@ -34,7 +38,43 @@ export async function pageBySlug(req, res) {
 
 export async function contact(req, res) {
   const msg = await ContactMessage.create({ ...req.valid.body, user: req.auth?.user._id });
+  // Automatic "we've received your message" email (Notifications → Email Notifications). Fire-and-forget.
+  if (msg.email) {
+    Promise.all([getSection("notifications"), getSection("contact")]).then(([n, contactInfo]) => {
+      if (n.supportAutoReply === false) return;
+      return trySendMail({ to: msg.email, ...supportAckEmail(msg, contactInfo), type: "support_ack", ref: String(msg._id) });
+    }).catch(() => {});
+  }
   created(res, { id: String(msg._id), received: true });
+}
+
+/* ---------- FAQs (public, active only) ---------- */
+export async function faqs(_req, res) {
+  const items = await Faq.find({ status: "active" }).sort({ order: 1, createdAt: 1 }).select("question answer category").lean();
+  ok(res, items.map(({ _id, question, answer, category }) => ({ id: String(_id), question, answer, category })));
+}
+
+/* ---------- Newsletter unsubscribe (signed link from promotional emails) ---------- */
+const page = (res, status, title, body) => res.status(status)
+  .set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'")
+  .type("html")
+  .send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;background:#f4f5fa;color:#1f2940;display:grid;place-items:center;min-height:100vh;margin:0}main{background:#fff;padding:32px;border-radius:14px;max-width:420px;text-align:center;box-shadow:0 8px 30px #1f294014}h1{font-size:22px;margin:0 0 10px}button{background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:12px 20px;font-size:15px;font-weight:700;cursor:pointer}</style></head>
+<body><main><h1>${title}</h1>${body}</main></body></html>`);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+
+export function unsubscribePage(req, res) {
+  const e = String(req.query.e || ""), t = String(req.query.t || "");
+  if (!verifyUnsubscribe(e, t)) return page(res, 400, "Link not valid", "<p>This unsubscribe link is incomplete or has been changed. Use the link from the latest email.</p>");
+  page(res, 200, "Unsubscribe from Shoponzy emails?", `<p>${esc(e)} will stop receiving offers and announcements. Order and account emails are not affected.</p>
+<form method="post" action="?e=${encodeURIComponent(e)}&amp;t=${encodeURIComponent(t)}"><button type="submit">Unsubscribe</button></form>`);
+}
+
+export async function unsubscribe(req, res) {
+  const e = String(req.query.e || req.body?.e || ""), t = String(req.query.t || req.body?.t || "");
+  if (!verifyUnsubscribe(e, t)) return page(res, 400, "Link not valid", "<p>This unsubscribe link is incomplete or has been changed.</p>");
+  await NewsletterSubscriber.updateOne({ email: e.toLowerCase() }, { $set: { status: "unsubscribed" } });
+  page(res, 200, "You're unsubscribed", `<p>${esc(e)} won't receive Shoponzy offers or announcements any more.</p>`);
 }
 
 export async function newsletter(req, res) {

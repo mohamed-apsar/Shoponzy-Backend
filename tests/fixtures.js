@@ -91,14 +91,19 @@ export function mockRazorpay(secret = "test_key_secret") {
     async fetchOrderPayments(orderId) { return [...payments.values()].filter((p) => p.order_id === orderId); },
     async refund(paymentId, { amount }) {
       if (client.failRefund) throw { error: { description: "Refund amount exceeds" } };
-      const r = { id: `rfnd_${++n}`, payment_id: paymentId, amount, status: "processed" };
+      const r = { id: `rfnd_${++n}`, payment_id: paymentId, amount, status: client.refundStatus || "processed" };
       refunds.push(r);
-      return r;
+      return { ...r };
+    },
+    async fetchRefund(paymentId, refundId) {
+      const r = refunds.find((x) => x.id === refundId && x.payment_id === paymentId);
+      if (!r) throw Object.assign(new Error("not found"), { error: { description: "The id provided does not exist" } });
+      return { ...r };
     },
     /* Simulates the customer paying in Razorpay Checkout. */
-    pay(orderId, { amount, status = "captured", method = "upi" } = {}) {
+    pay(orderId, { amount, status = "captured", method = "upi", extra = { vpa: "shopper@okaxis" } } = {}) {
       const id = `pay_${++n}${crypto.randomBytes(3).toString("hex")}`;
-      payments.set(id, { id, order_id: orderId, amount: amount ?? orders.get(orderId).amount, currency: "INR", status, method });
+      payments.set(id, { id, order_id: orderId, amount: amount ?? orders.get(orderId).amount, currency: "INR", status, method, ...extra });
       return payments.get(id);
     },
     sign: (orderId, paymentId) => crypto.createHmac("sha256", secret).update(`${orderId}|${paymentId}`).digest("hex"),

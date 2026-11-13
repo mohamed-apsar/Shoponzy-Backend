@@ -18,7 +18,7 @@ export const hashPassword = (password) => bcrypt.hash(password, env.BCRYPT_ROUND
 async function startSession(user, audience, ctx) {
   const refreshToken = newRefreshToken();
   const session = await Session.create({
-    user: user._id, audience, tokenHash: hashToken(refreshToken), expiresAt: refreshExpiry(),
+    user: user._id, audience, tokenHash: hashToken(refreshToken), expiresAt: refreshExpiry(audience),
     userAgent: ctx.userAgent?.slice(0, 300), ip: ctx.ip,
   });
   const accessToken = signAccessToken({ userId: user._id, role: user.role, sessionId: session._id, audience });

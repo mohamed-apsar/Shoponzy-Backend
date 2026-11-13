@@ -4,7 +4,7 @@ const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Use a 6-digit hex colour.");
 // Internal paths ("/categories/shoes") or absolute http(s) URLs only — never javascript: etc.
 export const link = z.string().trim().max(500).refine((v) => v === "" || /^\/(?!\/)/.test(v) || /^https?:\/\//i.test(v), "Use a /path or an http(s):// URL.");
 const optionalUrl = z.string().trim().max(500).refine((v) => v === "" || /^https?:\/\//i.test(v), "Use an http(s):// URL.");
-const robotsMeta = z.string().trim().max(300).refine(
+export const robotsDirectivesSchema = z.string().trim().max(300).refine(
   (value) => value.split(",").every((directive) => /^(?:index|noindex|follow|nofollow|noarchive|noimageindex|nosnippet|max-snippet:-?\d+|max-video-preview:-?\d+|max-image-preview:(?:large|standard|none))$/.test(directive.trim().toLowerCase())),
   "Use supported robots meta directives.",
 );
@@ -23,11 +23,12 @@ export const sitemapXmlSchema = z.string().trim().max(8_000_000).refine(
 export const SETTINGS_SCHEMAS = {
   homeCategories: z.object({
     categories: z.array(z.string().trim().min(1).max(80)).max(30),
-    showAllCategories: z.boolean(), showNewIn: z.boolean(), showDeals: z.boolean(),
-    newInImage: imageRef,
+    showAllCategories: z.boolean(), showNewIn: z.boolean(), showDeals: z.boolean().optional(),
+    newInImage: imageRef.optional(),
   }).strict(),
   general: z.object({
     websiteName: text(60).min(1), tagline: text(120), websiteUrl: optionalUrl,
+    taxRate: z.number().min(0).max(100),
     currency: z.enum(["INR"]), language: z.enum(["English"]),
     productsPerPage: z.coerce.number().int().min(4).max(96), gridColumns: z.coerce.number().int().min(2).max(6),
     breadcrumbs: z.boolean(), wishlist: z.boolean(), comparison: z.boolean(),
@@ -54,7 +55,7 @@ export const SETTINGS_SCHEMAS = {
     title: text(70), description: text(160), keywords: text(300), canonical: optionalUrl,
     ogTitle: text(90), ogDescription: text(200), shareImage: imageRef,
     googleVerification: text(300), bingVerification: text(300), baiduVerification: text(300), yandexVerification: text(300),
-    robotsTxt: z.string().trim().max(10_000), robotsMeta,
+    robotsTxt: z.string().trim().max(10_000), robotsMeta: robotsDirectivesSchema,
     sitemapXml: sitemapXmlSchema,
   }).strict(),
   contact: z.object({
@@ -72,6 +73,20 @@ export const SETTINGS_SCHEMAS = {
     prepaidOffPct: z.number().min(0).max(50), codEnabled: z.boolean(),
     codMaxOrderValue: z.number().min(0).max(1_000_000).nullable(),
     deliveryText: text(120), returnDays: z.number().int().min(0).max(60),
+  }).strict(),
+  // Admin-only (not sent to the storefront): stock alert level used by Inventory Management.
+  inventory: z.object({
+    lowStockThreshold: z.number().int().min(0).max(100_000),
+  }).strict(),
+  shipping: z.object({
+    states: z.array(z.object({
+      name: text(80).min(1), enabled: z.boolean(),
+      districts: z.array(z.object({ name: text(80).min(1), enabled: z.boolean() }).strict()).max(100),
+    }).strict()).max(40),
+    pincodes: z.array(z.object({
+      code: z.string().regex(/^\d{6}$/), state: text(80).min(1), district: text(80).min(1),
+      price: z.number().min(0).max(10_000), enabled: z.boolean(),
+    }).strict()).max(20_000),
   }).strict(),
 };
 

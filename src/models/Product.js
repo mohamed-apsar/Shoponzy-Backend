@@ -1,9 +1,16 @@
 import mongoose from "mongoose";
 import { toJSONPlugin } from "./plugins.js";
-import { imageSchema, round2, seoSchema } from "./shared.js";
+import { imageSchema, round2 } from "./shared.js";
 
 export const PRODUCT_STATUSES = ["active", "disabled", "archived"];
 export const BADGES = ["", "Bestseller", "Trending", "New Drop"];
+
+const productSeoSchema = new mongoose.Schema({
+  title: { type: String, maxlength: 70, default: "" },
+  description: { type: String, maxlength: 160, default: "" },
+  image: { type: imageSchema, default: null },
+  robots: { type: String, maxlength: 300, default: "index, follow" },
+}, { _id: false });
 
 /* One purchasable combination. Products without options have a single variant (color/size null). */
 const variantSchema = new mongoose.Schema({
@@ -13,9 +20,23 @@ const variantSchema = new mongoose.Schema({
   price: { type: Number, required: true, min: 0 },
   mrp: { type: Number, min: 0, default: 0 },
   stock: { type: Number, required: true, min: 0, default: 0, validate: Number.isInteger },
+  minStock: { type: Number, min: 0, default: 0, validate: Number.isInteger },
   status: { type: String, enum: ["active", "disabled"], default: "active" },
 });
 toJSONPlugin(variantSchema);
+
+const colorSchema = new mongoose.Schema({
+  name: { type: String, required: true, trim: true, maxlength: 40 },
+  hex: { type: String, match: /^#[0-9a-fA-F]{6}$/, required: true },
+  featuredImage: { type: imageSchema, default: null },
+  images: { type: [imageSchema], default: [] },
+}, { _id: false });
+
+const productContentBlockSchema = new mongoose.Schema({
+  type: { type: String, enum: ["banner", "imageRow"], required: true },
+  image: { type: imageSchema, default: null },
+  images: { type: [imageSchema], default: [] },
+}, { _id: false });
 
 const productSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 160 },
@@ -28,8 +49,9 @@ const productSchema = new mongoose.Schema({
   category: { type: mongoose.Schema.Types.ObjectId, ref: "Category", required: true },
   // category + all its ancestors, so a product shows under every level of its branch.
   categoryPath: [{ type: mongoose.Schema.Types.ObjectId, ref: "Category" }],
-  images: { type: [imageSchema], default: [] }, // images[0] is the primary image
-  colors: [{ name: { type: String, required: true, trim: true, maxlength: 40 }, hex: { type: String, match: /^#[0-9a-fA-F]{6}$/, required: true }, _id: false }],
+  images: { type: [imageSchema], default: [] }, // Shared gallery; colour galleries take precedence when present.
+  colors: { type: [colorSchema], default: [] },
+  contentBlocks: { type: [productContentBlockSchema], default: [] },
   sizes: [{ type: String, trim: true, maxlength: 20 }],
   variants: { type: [variantSchema], validate: [(v) => v.length > 0, "A product needs at least one variant."] },
   specs: [{ label: { type: String, maxlength: 60 }, value: { type: String, maxlength: 200 }, _id: false }],
@@ -39,10 +61,12 @@ const productSchema = new mongoose.Schema({
   isBestseller: { type: Boolean, default: false },
   isTrending: { type: Boolean, default: false },
   isFeatured: { type: Boolean, default: false },
-  badge: { type: String, enum: BADGES, default: "" },
+  badge: { type: String, trim: true, maxlength: 40, default: "" },
   occasions: [{ type: String, trim: true, maxlength: 40 }],
   status: { type: String, enum: PRODUCT_STATUSES, default: "active", index: true },
-  seo: { type: seoSchema, default: () => ({}) },
+  // Per-product low-stock alert level; null = the store-wide threshold (Inventory settings).
+  lowStockThreshold: { type: Number, min: 0, max: 100_000, default: null },
+  seo: { type: productSeoSchema, default: () => ({}) },
 
   // Derived on save from active variants — used for listing, filtering and sorting.
   minPrice: Number,

@@ -1,7 +1,7 @@
 import { Order, Payment, WebhookEvent } from "../models/commerce.js";
 import { User } from "../models/User.js";
 import * as orders from "../services/orderService.js";
-import { getRazorpay, verifyCheckoutSignature, verifyWebhookSignature } from "../services/razorpayService.js";
+import { getRazorpay, paymentFailure, paymentMethodDetails, verifyCheckoutSignature, verifyWebhookSignature } from "../services/razorpayService.js";
 import { AppError } from "../utils/AppError.js";
 import { logger } from "../utils/logger.js";
 import { created, ok, paginate } from "../utils/respond.js";
@@ -37,6 +37,20 @@ async function findOwnOrder(req) {
 
 export async function myOrders(req, res) {
   const { skip, limit, meta } = paginate(req.valid.query);
+  const customer = req.auth.user;
+  // Recover older guest-checkout orders after the guest cookie has already been cleared.
+  // Require both the account email and phone to match before attaching any order.
+  if (customer.email && customer.phone) {
+    await Order.updateMany(
+      {
+        user: { $exists: false },
+        "contact.email": customer.email.toLowerCase(),
+        "contact.phone": customer.phone,
+        status: { $ne: "pending_payment" },
+      },
+      { $set: { user: customer._id }, $unset: { guestId: "" } },
+    );
+  }
   const filter = { user: req.owner.userId, status: { $ne: "pending_payment" } };
   const [items, total] = await Promise.all([Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit), Order.countDocuments(filter)]);
   ok(res, items.map(orders.customerOrderView), meta(total));
@@ -80,7 +94,7 @@ export async function verifyRazorpay(req, res) {
   if (p.status === "authorized") p = await rzp.capturePayment(p.id, p.amount, p.currency);
   if (p.status !== "captured") throw new AppError(402, "PAYMENT_NOT_CAPTURED", "Your payment hasn't completed yet. We'll update your order as soon as it does.");
 
-  const updated = await orders.markPaid(order, { providerPaymentId: p.id, method: p.method, amountPaise: p.amount, via: "checkout" });
+  const updated = await orders.markPaid(order, { providerPaymentId: p.id, method: p.method, details: paymentMethodDetails(p), amountPaise: p.amount, via: "checkout" });
   ok(res, { order: orders.customerOrderView(updated) });
 }
 
@@ -102,12 +116,13 @@ export async function razorpayWebhook(req, res) {
     if ((event.event === "payment.captured" || event.event === "order.paid") && pay) {
       const record = await Payment.findOne({ provider: "razorpay", providerOrderId: pay.order_id });
       const order = record && (await Order.findById(record.order));
-      if (order) await orders.markPaid(order, { providerPaymentId: pay.id, method: pay.method, amountPaise: pay.amount, via: "webhook" });
+      if (order) await orders.markPaid(order, { providerPaymentId: pay.id, method: pay.method, details: paymentMethodDetails(pay), amountPaise: pay.amount, via: "webhook" });
     } else if (event.event === "payment.failed" && pay) {
-      await orders.recordPaymentFailure(pay.order_id, { providerPaymentId: pay.id, code: pay.error_code, description: pay.error_description });
+      await orders.recordPaymentFailure(pay.order_id, { providerPaymentId: pay.id, ...paymentFailure(pay), method: pay.method, details: paymentMethodDetails(pay) });
     } else if (event.event?.startsWith("refund.")) {
+      // refund.created / refund.processed / refund.failed — the refund entity carries the verified status.
       const r = event.payload?.refund?.entity;
-      if (r) await Payment.updateOne({ providerPaymentId: r.payment_id, "refunds.refundId": r.id }, { $set: { "refunds.$.status": r.status } });
+      if (r) await orders.applyRefundStatus({ refundId: r.id, status: r.status, failureReason: r.error_description || r.notes?.failure_reason, via: "webhook" });
     }
     await WebhookEvent.updateOne({ provider: "razorpay", eventId }, { $set: { processedAt: new Date() } });
   } catch (err) {

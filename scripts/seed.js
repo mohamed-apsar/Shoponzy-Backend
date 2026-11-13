@@ -4,7 +4,7 @@
    npm run seed -- --upload-images   also copy the real product photos into Cloudinary
    npm run seed -- --force           allow running with NODE_ENV=production
 
-   Source: user-site/src/data/catalog.js (the same data the React storefront ships with).
+   Source: src/data/catalog.js at the repo root (the same data the React storefront ships with).
    ⚠️ Stock levels are SAMPLE values (20 per variant) — the original site had no stock data.
    ⚠️ "From ₹480–₹520" products: sizes 9+ are given the upper price; confirm with the store. */
 import { parseArgs } from "node:util";
@@ -16,7 +16,7 @@ import { Coupon, InventoryMovement } from "../src/models/commerce.js";
 import { Banner, HomepageSection, Page } from "../src/models/site.js";
 import { uploadImage } from "../src/services/uploadService.js";
 import { slugify } from "../src/utils/slugify.js";
-import { CATS, PRODUCTS, HERO_SLIDES, STORE } from "../../user-site/src/data/catalog.js";
+import { CATS, PRODUCTS, HERO_SLIDES, STORE } from "../../src/data/catalog.js";
 
 export const SAMPLE_STOCK = 20;
 

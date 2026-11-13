@@ -1,13 +1,13 @@
 import { Category } from "../../models/Category.js";
 import { Product } from "../../models/Product.js";
-import { InventoryMovement } from "../../models/commerce.js";
 import { audit } from "../../models/AuditLog.js";
-import { env } from "../../config/env.js";
+import { getLowStockThreshold } from "../../services/inventoryService.js";
 import * as categories from "../../services/categoryService.js";
 import * as products from "../../services/productService.js";
 import { AppError } from "../../utils/AppError.js";
 import { created, ok, paginate } from "../../utils/respond.js";
 import { escapeRegex } from "../../validators/common.js";
+import { sendCsv } from "../../utils/csv.js";
 
 const actor = (req) => req.auth.user;
 const log = (req, action, entity, entityId, meta) => audit(action, { actor: req.auth.user._id, entity, entityId, ip: req.ip, meta });
@@ -26,10 +26,29 @@ export async function listCategories(req, res) {
     Category.countDocuments(filter),
   ]);
   // productCount helps admins see which categories are in use before deleting.
-  const counts = await Product.aggregate([{ $match: { status: { $ne: "archived" }, categoryPath: { $in: items.map((c) => c._id) } } }, { $unwind: "$categoryPath" }, { $group: { _id: "$categoryPath", n: { $sum: 1 } } }]);
+  const categoryIds = items.map((c) => c._id);
+  const [counts, productsWithImages] = await Promise.all([
+    Product.aggregate([{ $match: { status: { $ne: "archived" }, categoryPath: { $in: categoryIds } } }, { $unwind: "$categoryPath" }, { $group: { _id: "$categoryPath", n: { $sum: 1 } } }]),
+    Product.find({ status: { $ne: "archived" }, categoryPath: { $in: categoryIds } })
+      .select("categoryPath images colors.featuredImage")
+      .sort({ createdAt: 1, _id: 1 })
+      .lean(),
+  ]);
   const byId = new Map(counts.map((c) => [String(c._id), c.n]));
+  const categoryIdSet = new Set(categoryIds.map(String));
+  const productImageByCategory = new Map();
+  for (const product of productsWithImages) {
+    const image = product.images?.find((item) => item.url)
+      || product.colors?.find((color) => color.featuredImage?.url)?.featuredImage;
+    if (!image) continue;
+    for (const categoryId of product.categoryPath || []) {
+      const key = String(categoryId);
+      if (categoryIdSet.has(key) && !productImageByCategory.has(key)) productImageByCategory.set(key, image);
+    }
+  }
   ok(res, items.map(({ _id, __v, ancestors, ...c }) => ({
     id: String(_id), ...c, parent: c.parent ? String(c.parent) : null,
+    productImage: c.productImage || productImageByCategory.get(String(_id)) || null,
     ancestors: ancestors.map((a) => ({ id: String(a._id), name: a.name, slug: a.slug })),
     pathNames: ancestors.map((a) => a.name).join(" / "), productCount: byId.get(String(_id)) || 0,
   })), meta(total));
@@ -69,7 +88,7 @@ export async function listProducts(req, res) {
   if (category) filter.categoryPath = category;
   if (stock === "out") filter.totalStock = 0;
   if (stock === "in") filter.totalStock = { $gt: 0 };
-  if (stock === "low") filter.variants = { $elemMatch: { status: "active", stock: { $gt: 0, $lte: env.LOW_STOCK_THRESHOLD } } };
+  if (stock === "low") Object.assign(filter, products.lowStockFilter(await getLowStockThreshold()));
   if (flag) filter[{ new: "isNewArrival", bestseller: "isBestseller", trending: "isTrending", featured: "isFeatured" }[flag]] = true;
   if (q) {
     const rx = new RegExp(escapeRegex(q), "i");
@@ -106,9 +125,9 @@ export async function deleteProduct(req, res) {
 }
 export async function adjustStock(req, res) {
   const { variantId, ...change } = req.valid.body;
-  const p = await products.adjustStock(req.params.id, variantId, change, actor(req));
-  await log(req, "product.stock_adjusted", "Product", p._id, { variantId, ...change });
-  ok(res, p);
+  const { product, movement } = await products.adjustStock(req.params.id, variantId, change, actor(req));
+  await log(req, "product.stock_adjusted", "Product", product._id, { variantId, sku: movement.sku, mode: movement.mode, before: movement.before, after: movement.after, reason: movement.reason, note: movement.note });
+  ok(res, product);
 }
 
 export async function bulkProducts(req, res) {
@@ -137,17 +156,6 @@ export async function exportProducts(_req, res) {
   for await (const p of cursor) {
     for (const v of p.variants) rows.push([p._id, p.name, p.slug, p.category?.path, p.brand, p.status, v._id, v.sku, v.color, v.size, v.price, v.mrp, v.stock]);
   }
-  // Prefix cells that spreadsheets would treat as formulas.
-  const cell = (v) => { const s = String(v ?? ""); const safe = /^[=+\-@]/.test(s) ? `'${s}` : s; return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe; };
-  res.type("text/csv").attachment(`shoponzy-products-${new Date().toISOString().slice(0, 10)}.csv`).send(rows.map((r) => r.map(cell).join(",")).join("\n"));
+  sendCsv(res, `shoponzy-products-${new Date().toISOString().slice(0, 10)}.csv`, rows);
 }
-
-export async function inventoryMovements(req, res) {
-  const { skip, limit, meta } = paginate(req.query);
-  const filter = req.query.product && /^[a-f\d]{24}$/i.test(req.query.product) ? { product: req.query.product } : {};
-  const [items, total] = await Promise.all([
-    InventoryMovement.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).populate("product", "name slug").populate("actor", "name").populate("order", "orderNumber"),
-    InventoryMovement.countDocuments(filter),
-  ]);
-  ok(res, items, meta(total));
-}
+/* Stock history (InventoryMovement) is served by inventoryAdmin.js. */

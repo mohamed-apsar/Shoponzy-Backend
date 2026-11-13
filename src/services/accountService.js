@@ -34,6 +34,44 @@ export async function changePassword(userId, { currentPassword, newPassword }, k
   await Session.updateMany({ user: userId, revokedAt: null, _id: { $ne: keepSessionId } }, { revokedAt: new Date(), revokedReason: "password_changed" });
 }
 
+export async function changeAdminEmail(userId, { currentPassword, newEmail }, keepSessionId) {
+  const user = await checkPassword(userId, currentPassword);
+  if (user.role !== "admin") throw AppError.forbidden();
+  const normalizedEmail = newEmail.trim().toLowerCase();
+  if (normalizedEmail === user.email) return user;
+  if (await User.exists({ email: normalizedEmail, _id: { $ne: userId } })) {
+    throw AppError.conflict("An account with this email already exists.");
+  }
+  user.email = normalizedEmail;
+  try {
+    await user.save();
+  } catch (error) {
+    if (error?.code === 11000) throw AppError.conflict("An account with this email already exists.");
+    throw error;
+  }
+  await Session.updateMany({ user: userId, revokedAt: null, _id: { $ne: keepSessionId } }, { revokedAt: new Date(), revokedReason: "email_changed" });
+  return user;
+}
+
+export async function changeAdminCredentials(userId, { currentPassword, newEmail, newPassword }, keepSessionId) {
+  const user = await checkPassword(userId, currentPassword);
+  if (user.role !== "admin") throw AppError.forbidden();
+  const normalizedEmail = newEmail.trim().toLowerCase();
+  if (await User.exists({ email: normalizedEmail, _id: { $ne: userId } })) {
+    throw AppError.conflict("An account with this email already exists.");
+  }
+  user.email = normalizedEmail;
+  user.passwordHash = await hashPassword(newPassword);
+  try {
+    await user.save();
+  } catch (error) {
+    if (error?.code === 11000) throw AppError.conflict("An account with this email already exists.");
+    throw error;
+  }
+  await Session.updateMany({ user: userId, revokedAt: null, _id: { $ne: keepSessionId } }, { revokedAt: new Date(), revokedReason: "credentials_changed" });
+  return user;
+}
+
 /* ---------- Addresses ---------- */
 export async function addAddress(userId, data) {
   const user = await User.findById(userId);
@@ -97,7 +135,7 @@ export async function forgotPassword(email) {
   await PasswordReset.deleteMany({ user: user._id, usedAt: null });
   await PasswordReset.create({ user: user._id, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + RESET_TTL_MS) });
   const link = `${env.CLIENT_URL}/reset-password?token=${token}`;
-  await sendMail({ to: user.email, ...passwordResetEmail({ name: user.name, link }) });
+  await sendMail({ to: user.email, ...passwordResetEmail({ name: user.name, link }), type: "password_reset" });
 }
 
 export async function resetPassword(token, newPassword) {

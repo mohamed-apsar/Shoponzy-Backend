@@ -1,4 +1,6 @@
+import { env } from "../config/env.js";
 import { SiteSetting } from "../models/site.js";
+import { DEFAULT_RETURN_REASONS } from "../models/commerce.js";
 import { SECTIONS } from "../validators/siteValidators.js";
 
 /* Defaults = what the live storefront shows today, so an unconfigured site looks unchanged. */
@@ -6,6 +8,7 @@ export const DEFAULT_SETTINGS = {
   homeCategories: { categories: [], showAllCategories: true, showNewIn: true, showDeals: true, newInImage: null },
   general: {
     websiteName: "Shoponzy", tagline: "Shoes, sunglasses, perfumes, clothing, watches & essentials", websiteUrl: "https://shoponzy.in",
+    taxRate: 0,
     currency: "INR", language: "English", productsPerPage: 24, gridColumns: 4, breadcrumbs: true, wishlist: true, comparison: false,
   },
   branding: {
@@ -46,6 +49,15 @@ export const DEFAULT_SETTINGS = {
     freeShippingAbove: 999, shippingFee: 59, prepaidOffPct: 5, codEnabled: true, codMaxOrderValue: null,
     deliveryText: "Usually delivered in 3–7 working days", returnDays: 7,
   },
+  inventory: { lowStockThreshold: env.LOW_STOCK_THRESHOLD },
+  shipping: { states: [], pincodes: [] },
+  // Admin-only and not a Manage Site section: edited through /admin/returns/reasons (which guards reasons in use).
+  returns: { reasons: DEFAULT_RETURN_REASONS },
+  // Admin-only: which automatic emails are sent (Notifications → Email Notifications).
+  notifications: {
+    orderConfirmation: true, orderShipped: true, orderDelivered: true, orderCancelled: true,
+    returnUpdates: true, supportAutoReply: true,
+  },
 };
 
 export async function getSection(section) {
@@ -78,8 +90,9 @@ export function publicSettings(all, now = new Date()) {
   const a = all.announcement;
   const publicSeo = { ...all.seo };
   delete publicSeo.sitemapXml;
+  const { inventory: _inventory, ...visible } = all;
   return {
-    ...all,
+    ...visible,
     seo: publicSeo,
     announcement: { ...a, active: a.enabled && all.headerFooter.announcementVisible && inWindow(a.startDate, a.endDate) },
   };

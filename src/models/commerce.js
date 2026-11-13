@@ -1,20 +1,32 @@
 import mongoose from "mongoose";
 import { toJSONPlugin } from "./plugins.js";
+import { imageSchema } from "./shared.js";
 
 const { ObjectId, Mixed } = mongoose.Schema.Types;
 
 /* ---------- Inventory movements: every stock change, with its reason ---------- */
+export const MOVEMENT_REASONS = ["order", "order_cancelled", "reservation_expired", "late_payment", "adjustment", "restock", "return", "initial", "damaged", "correction"];
+// Reasons an admin may pick for a manual adjustment.
+export const MANUAL_STOCK_REASONS = ["adjustment", "restock", "return", "damaged", "correction"];
 const inventoryMovementSchema = new mongoose.Schema({
   product: { type: ObjectId, ref: "Product", required: true, index: true },
   variant: { type: ObjectId, required: true },
   sku: String,
   delta: { type: Number, required: true },
-  reason: { type: String, enum: ["order", "order_cancelled", "reservation_expired", "late_payment", "adjustment", "restock", "return", "initial"], required: true },
+  reason: { type: String, enum: MOVEMENT_REASONS, required: true },
+  // How a manual change was entered (add / remove / set exact). Empty for automatic movements.
+  mode: { type: String, enum: ["add", "remove", "set", null], default: null },
+  // Variant stock before and after this movement (recorded for movements made from v2 on; older rows lack them).
+  before: { type: Number, default: null },
+  after: { type: Number, default: null },
   order: { type: ObjectId, ref: "Order" },
+  returnRequest: { type: ObjectId, ref: "ReturnRequest" },
   actor: { type: ObjectId, ref: "User" },
   note: { type: String, maxlength: 300 },
 }, { timestamps: { createdAt: true, updatedAt: false } });
 inventoryMovementSchema.index({ createdAt: -1 });
+inventoryMovementSchema.index({ product: 1, variant: 1, createdAt: -1 });
+inventoryMovementSchema.index({ reason: 1, createdAt: -1 });
 toJSONPlugin(inventoryMovementSchema);
 export const InventoryMovement = mongoose.model("InventoryMovement", inventoryMovementSchema);
 
@@ -82,7 +94,7 @@ const orderSchema = new mongoose.Schema({
   couponDiscount: { type: Number, default: 0 },
   prepaidDiscount: { type: Number, default: 0 },
   shippingFee: { type: Number, default: 0 },
-  tax: { type: Number, default: 0 }, // prices are tax-inclusive
+  tax: { type: Number, default: 0 }, // tax collected on discounted product prices at checkout
   total: { type: Number, required: true },
   currency: { type: String, default: "INR" },
   paymentMethod: { type: String, enum: ["cod", "razorpay"], required: true },
@@ -93,6 +105,8 @@ const orderSchema = new mongoose.Schema({
   needsAttention: { type: String, default: null }, // e.g. paid after reservation expired and stock ran out
   refundRequired: { type: Boolean, default: false },
   refundedAmount: { type: Number, default: 0 },
+  // Set while a refund call to the gateway is in flight, so a double click can't refund twice.
+  refundLockedAt: { type: Date, default: null },
   fulfilment: {
     courier: String, trackingNumber: String, trackingUrl: String, shippedAt: Date, deliveredAt: Date,
   },
@@ -119,15 +133,107 @@ const paymentSchema = new mongoose.Schema({
   currency: { type: String, default: "INR" },
   status: { type: String, enum: ["created", "authorized", "captured", "failed", "refunded", "partially_refunded", "pending"], default: "created", index: true },
   method: String, // upi, card, netbanking… as reported by the gateway
+  // Non-sensitive details Razorpay returns (never a full card number or CVV — Razorpay doesn't send them).
+  methodDetails: {
+    bank: String, wallet: String, vpa: String,
+    cardNetwork: String, cardType: String, cardLast4: String, cardIssuer: String,
+    _id: false,
+  },
   errorCode: String,
   errorDescription: String,
-  refunds: [{ refundId: String, amount: Number, status: String, at: { type: Date, default: Date.now }, by: { type: ObjectId, ref: "User" }, _id: false }],
+  errorSource: String,
+  errorStep: String,
+  errorReason: String,
+  capturedAt: Date,
+  refunds: [{
+    refundId: String, amount: Number,
+    // Razorpay: pending | processed | failed. Manual (COD) refunds are recorded as processed.
+    status: String,
+    at: { type: Date, default: Date.now }, by: { type: ObjectId, ref: "User" },
+    processedAt: Date, failedAt: Date, failureReason: String, reason: String,
+    returnRequest: { type: ObjectId, ref: "ReturnRequest" },
+    manual: { type: Boolean, default: false },
+    _id: false,
+  }],
   refundedAmount: { type: Number, default: 0 },
 }, { timestamps: true });
 paymentSchema.index({ providerPaymentId: 1 }, { unique: true, partialFilterExpression: { providerPaymentId: { $type: "string" } } });
 paymentSchema.index({ createdAt: -1 });
+paymentSchema.index({ method: 1, createdAt: -1 });
+paymentSchema.index({ "refunds.refundId": 1 });
 toJSONPlugin(paymentSchema);
 export const Payment = mongoose.model("Payment", paymentSchema);
+
+/* ---------- Return requests (customer-initiated, admin-reviewed) ---------- */
+export const RETURN_STATUSES = ["requested", "approved", "rejected", "pickup_scheduled", "in_transit", "received", "inspected", "completed", "cancelled"];
+export const RETURN_REFUND_STATUSES = ["not_applicable", "pending", "processing", "completed", "failed"];
+/* Default return reasons. Admins can add, rename and disable reasons (settings key "returns"); each request
+   stores the reason code and the label shown at the time. */
+export const DEFAULT_RETURN_REASONS = [
+  { code: "damaged", label: "Damaged product", active: true, requiresComment: false },
+  { code: "wrong_item", label: "Wrong product delivered", active: true, requiresComment: false },
+  { code: "defective", label: "Defective product", active: true, requiresComment: false },
+  { code: "size_fit", label: "Size or fit issue", active: true, requiresComment: false },
+  { code: "not_as_described", label: "Product not as described", active: true, requiresComment: false },
+  { code: "missing_items", label: "Missing items", active: true, requiresComment: false },
+  { code: "changed_mind", label: "Changed mind", active: true, requiresComment: false },
+  { code: "other", label: "Other", active: true, requiresComment: true },
+];
+export const RETURN_REASON_CODE = /^[a-z0-9_]{2,40}$/;
+export const ITEM_CONDITIONS = ["good", "opened", "damaged", "unsellable"];
+
+const returnItemSchema = new mongoose.Schema({
+  product: { type: ObjectId, ref: "Product" },
+  variant: ObjectId,
+  sku: String, name: String, image: String, color: String, size: String,
+  price: Number, // unit price paid, from the order
+  qty: { type: Number, required: true, min: 1 },
+  condition: { type: String, enum: [...ITEM_CONDITIONS, null], default: null },
+  restockedQty: { type: Number, default: 0 },
+}, { _id: false });
+
+const returnRequestSchema = new mongoose.Schema({
+  returnNumber: { type: String, required: true, unique: true },
+  order: { type: ObjectId, ref: "Order", required: true, index: true },
+  orderNumber: { type: String, required: true, index: true },
+  user: { type: ObjectId, ref: "User", index: true },
+  guestId: String,
+  contact: { name: String, email: String, phone: String },
+  items: { type: [returnItemSchema], validate: [(v) => v.length > 0, "Choose at least one item to return."] },
+  reason: { type: String, required: true, match: RETURN_REASON_CODE, index: true },
+  reasonLabel: { type: String, maxlength: 80 },
+  comments: { type: String, maxlength: 1000, default: "" },
+  evidence: { type: [imageSchema], default: [] },
+  status: { type: String, enum: RETURN_STATUSES, default: "requested", index: true },
+  adminNote: { type: String, maxlength: 1000, default: "" },
+  rejectionReason: { type: String, maxlength: 500, default: "" },
+  decidedBy: { type: ObjectId, ref: "User" },
+  decidedAt: Date,
+  pickup: { courier: String, trackingNumber: String, scheduledAt: Date, _id: false },
+  receivedAt: Date,
+  inspectedAt: Date,
+  inspectedBy: { type: ObjectId, ref: "User" },
+  inspectionNotes: { type: String, maxlength: 1000, default: "" },
+  completedAt: Date,
+  refund: {
+    status: { type: String, enum: RETURN_REFUND_STATUSES, default: "not_applicable" },
+    amount: Number,
+    refundId: String,
+    payment: { type: ObjectId, ref: "Payment" },
+    providerPaymentId: String,
+    initiatedAt: Date, completedAt: Date, failedAt: Date,
+    failureReason: String,
+    by: { type: ObjectId, ref: "User" },
+    _id: false,
+  },
+  history: [{ status: String, refundStatus: String, note: String, by: { type: ObjectId, ref: "User" }, at: { type: Date, default: Date.now }, _id: false }],
+}, { timestamps: true });
+returnRequestSchema.index({ createdAt: -1 });
+returnRequestSchema.index({ "refund.status": 1, createdAt: -1 });
+returnRequestSchema.index({ "refund.refundId": 1 });
+returnRequestSchema.index({ "contact.name": 1 });
+toJSONPlugin(returnRequestSchema, { hidden: ["guestId"] });
+export const ReturnRequest = mongoose.model("ReturnRequest", returnRequestSchema);
 
 /* ---------- Webhook events already processed (idempotency) ---------- */
 const webhookEventSchema = new mongoose.Schema({
