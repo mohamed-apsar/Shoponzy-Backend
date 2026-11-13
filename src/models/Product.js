@@ -30,6 +30,13 @@ const colorSchema = new mongoose.Schema({
   hex: { type: String, match: /^#[0-9a-fA-F]{6}$/, required: true },
   featuredImage: { type: imageSchema, default: null },
   images: { type: [imageSchema], default: [] },
+  // Per-colour showcase on the product page: a 16:5 banner and a row of three 2:3 images (independent slots).
+  bannerImage: { type: imageSchema, default: null },
+  rowImages: {
+    image1: { type: imageSchema, default: null },
+    image2: { type: imageSchema, default: null },
+    image3: { type: imageSchema, default: null },
+  },
 }, { _id: false });
 
 const productContentBlockSchema = new mongoose.Schema({

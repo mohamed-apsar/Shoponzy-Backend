@@ -64,6 +64,8 @@ const productColor = z.object({
   hex,
   featuredImage: imageRef.optional(),
   images: z.array(imageRef.unwrap()).max(12).optional(),
+  bannerImage: imageRef.optional(),
+  rowImages: z.object({ image1: imageRef.optional(), image2: imageRef.optional(), image3: imageRef.optional() }).strict().optional(),
 }).strict();
 const productContentBlock = z.discriminatedUnion("type", [
   z.object({ type: z.literal("banner"), image: imageRef.unwrap() }).strict(),

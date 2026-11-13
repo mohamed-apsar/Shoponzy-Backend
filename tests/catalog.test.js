@@ -178,6 +178,45 @@ describe("admin products", () => {
     expect(destroyed).toEqual([featured.publicId, gallery.publicId]);
   });
 
+  it("keeps a banner and three row images per colour, independent per slot and per colour", async () => {
+    const { destroyed } = mockCloudinary();
+    const jpeg = Buffer.concat([Buffer.from("ffd8ffe000104a4649460001", "hex"), Buffer.alloc(100)]);
+    const upload = async () => (await admin.agent.post(`${API}/admin/uploads`)
+      .set("X-CSRF-Token", admin.token).field("kind", "productVariant").attach("file", jpeg, "a.jpg").expect(201)).body.data;
+    const [feat, banner, r1, r2, r3, redFeat] = [await upload(), await upload(), await upload(), await upload(), await upload(), await upload()];
+    const cat = await category("Shoes");
+    const created = (await admin.post("/admin/products", {
+      name: "Showcase", category: String(cat._id), sizes: ["7"],
+      colors: [
+        { name: "Black", hex: "#111111", featuredImage: feat, bannerImage: banner, rowImages: { image1: r1, image2: r2, image3: r3 } },
+        { name: "Red", hex: "#aa0000", featuredImage: redFeat },
+      ],
+      variants: [{ color: "Black", size: "7", price: 100, stock: 2 }, { color: "Red", size: "7", price: 100, stock: 2 }],
+    }).expect(201)).body.data;
+    expect(created.colors[0].rowImages.image2.publicId).toBe(r2.publicId);
+    expect(created.colors[1].bannerImage).toBeNull();
+
+    const pub = (await request(app).get(`${API}/products/${created.slug}`).expect(200)).body.data;
+    expect(pub.colors[0].bannerImage.url).toBe(banner.url);
+    expect(pub.colors[0].rowImages.image3.url).toBe(r3.url);
+    expect(pub.colors[1].rowImages).toEqual({ image1: null, image2: null, image3: null });
+
+    // Replace slot 2 and remove slot 3 of Black only; banner, slot 1 and Red stay as they are.
+    const r2b = await upload();
+    const patched = (await admin.patch(`/admin/products/${created.id}`, {
+      colors: [
+        { name: "Black", hex: "#111111", rowImages: { image2: r2b, image3: null } },
+        { name: "Red", hex: "#aa0000" },
+      ],
+    }).expect(200)).body.data;
+    expect(patched.colors[0].bannerImage.publicId).toBe(banner.publicId);
+    expect(patched.colors[0].rowImages.image1.publicId).toBe(r1.publicId);
+    expect(patched.colors[0].rowImages.image2.publicId).toBe(r2b.publicId);
+    expect(patched.colors[0].rowImages.image3).toBeNull();
+    expect(patched.colors[1].featuredImage.publicId).toBe(redFeat.publicId);
+    expect(destroyed.sort()).toEqual([r2.publicId, r3.publicId].sort());
+  });
+
   it("stores ordered product banners and image rows, exposes them on detail, and releases replaced images", async () => {
     const { destroyed } = mockCloudinary();
     const jpeg = Buffer.concat([Buffer.from("ffd8ffe000104a4649460001", "hex"), Buffer.alloc(100)]);

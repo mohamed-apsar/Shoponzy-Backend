@@ -49,10 +49,13 @@ function normaliseVariants(input, existing) {
   return { colors, sizes, variants: variants.map((v) => ({ ...v, _id: v.id || prior.get(`${v.color}|${v.size}`) || new mongoose.Types.ObjectId(), sku: v.sku || undefined })) };
 }
 
+const ROW_SLOTS = ["image1", "image2", "image3"];
+const colorShowcaseImages = (color) => [color?.bannerImage, ...ROW_SLOTS.map((slot) => color?.rowImages?.[slot])].filter(Boolean);
+
 async function resolveProductColors(colors, existingColors = []) {
   return Promise.all(colors.map(async (color, index) => {
     const existing = existingColors.find((item) => item.name === color.name) || existingColors[index];
-    const existingImages = [existing?.featuredImage, ...(existing?.images || [])].filter(Boolean)
+    const existingImages = [existing?.featuredImage, ...(existing?.images || []), ...colorShowcaseImages(existing)].filter(Boolean)
       .map((image) => image.toObject ? image.toObject() : image);
     const featuredImage = color.featuredImage === undefined
       ? existing?.featuredImage || null
@@ -60,7 +63,17 @@ async function resolveProductColors(colors, existingColors = []) {
     const images = color.images === undefined
       ? existing?.images || []
       : await resolveImagesKeeping(color.images, existingImages);
-    return { ...color, featuredImage, images };
+    const bannerImage = color.bannerImage === undefined
+      ? existing?.bannerImage || null
+      : await resolveImageKeeping(color.bannerImage, existingImages);
+    // Each row slot is independent: an omitted slot keeps its image, null clears it.
+    const rowImages = {};
+    for (const slot of ROW_SLOTS) {
+      rowImages[slot] = color.rowImages?.[slot] === undefined
+        ? existing?.rowImages?.[slot] || null
+        : await resolveImageKeeping(color.rowImages[slot], existingImages);
+    }
+    return { ...color, featuredImage, images, bannerImage, rowImages };
   }));
 }
 
@@ -83,7 +96,7 @@ async function resolveProductContentBlocks(blocks = [], existingBlocks = []) {
 function productImageIds(product) {
   return imageIds(
     product.images,
-    (product.colors || []).flatMap((color) => [color.featuredImage, ...(color.images || [])]),
+    (product.colors || []).flatMap((color) => [color.featuredImage, ...(color.images || []), ...colorShowcaseImages(color)]),
     (product.contentBlocks || []).flatMap((block) => [block.image, ...(block.images || [])]),
     product.seo?.image,
   );
@@ -229,6 +242,8 @@ export function publicProduct(p, { includeContentBlocks = false } = {}) {
     images: p.images,
     colors: p.colors.map((color) => ({
       name: color.name, hex: color.hex, featuredImage: color.featuredImage || null, images: color.images || [],
+      bannerImage: color.bannerImage || null,
+      rowImages: { image1: color.rowImages?.image1 || null, image2: color.rowImages?.image2 || null, image3: color.rowImages?.image3 || null },
     })),
     ...(includeContentBlocks ? {
       contentBlocks: (p.contentBlocks || []).map((block) => ({
