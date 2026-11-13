@@ -29,6 +29,7 @@ const categoryBase = {
   bannerImage: imageRef.optional(),
   order: z.coerce.number().int().min(0).max(10_000).optional(),
   status: z.enum(["enabled", "disabled"]).optional(),
+  comingSoon: z.boolean().optional(),
   seo: seo.optional(),
   display: z.object({
     tagline: z.string().trim().max(80).optional(), color: hex.optional(), gradient: z.array(hex).max(2).optional(),

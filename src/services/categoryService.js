@@ -125,4 +125,5 @@ export async function publicTree() {
 export const publicCategory = (c) => ({
   id: String(c._id), name: c.name, slug: c.slug, path: c.path, level: c.level, parent: c.parent ? String(c.parent) : null,
   description: c.description, image: c.image, productImage: c.productImage, exploreImage: c.exploreImage, bannerImage: c.bannerImage, order: c.order, seo: c.seo, display: c.display,
+  comingSoon: Boolean(c.comingSoon),
 });

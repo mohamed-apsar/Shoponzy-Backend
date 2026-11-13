@@ -21,6 +21,7 @@ const categorySchema = new mongoose.Schema({
   bannerImage: { type: imageSchema, default: null },
   order: { type: Number, default: 0 },
   status: { type: String, enum: ["enabled", "disabled"], default: "enabled", index: true },
+  comingSoon: { type: Boolean, default: false },
   seo: { type: seoSchema, default: () => ({}) },
   // Storefront presentation (menus, heroes, banners). Optional; the site has sensible fallbacks.
   display: {
