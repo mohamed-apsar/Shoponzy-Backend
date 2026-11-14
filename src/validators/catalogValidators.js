@@ -59,6 +59,10 @@ const variant = z.object({
   minStock: z.coerce.number().int().min(0).max(1_000_000).default(0),
   status: z.enum(["active", "disabled"]).default("active"),
 }).strict();
+const variantShowcaseBlock = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("banner"), image: imageRef.unwrap() }).strict(),
+  z.object({ type: z.literal("imageRow"), images: z.array(imageRef.unwrap()).length(3) }).strict(),
+]);
 const productColor = z.object({
   name: z.string().trim().min(1).max(40),
   hex,
@@ -66,6 +70,7 @@ const productColor = z.object({
   images: z.array(imageRef.unwrap()).max(12).optional(),
   bannerImage: imageRef.optional(),
   rowImages: z.object({ image1: imageRef.optional(), image2: imageRef.optional(), image3: imageRef.optional() }).strict().optional(),
+  showcaseBlocks: z.array(variantShowcaseBlock).max(30).optional(),
 }).strict();
 const productContentBlock = z.discriminatedUnion("type", [
   z.object({ type: z.literal("banner"), image: imageRef.unwrap() }).strict(),

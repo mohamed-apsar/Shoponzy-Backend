@@ -50,7 +50,15 @@ function normaliseVariants(input, existing) {
 }
 
 const ROW_SLOTS = ["image1", "image2", "image3"];
-const colorShowcaseImages = (color) => [color?.bannerImage, ...ROW_SLOTS.map((slot) => color?.rowImages?.[slot])].filter(Boolean);
+const legacyColorShowcaseBlocks = (color) => [
+  ...(color?.bannerImage ? [{ type: "banner", image: color.bannerImage }] : []),
+  ...(ROW_SLOTS.some((slot) => color?.rowImages?.[slot]) ? [{ type: "imageRow", images: ROW_SLOTS.map((slot) => color?.rowImages?.[slot]).filter(Boolean) }] : []),
+];
+const colorShowcaseImages = (color) => [
+  color?.bannerImage,
+  ...ROW_SLOTS.map((slot) => color?.rowImages?.[slot]),
+  ...(color?.showcaseBlocks || []).flatMap((block) => [block.image, ...(block.images || [])]),
+].filter(Boolean);
 
 async function resolveProductColors(colors, existingColors = []) {
   return Promise.all(colors.map(async (color, index) => {
@@ -73,7 +81,16 @@ async function resolveProductColors(colors, existingColors = []) {
         ? existing?.rowImages?.[slot] || null
         : await resolveImageKeeping(color.rowImages[slot], existingImages);
     }
-    return { ...color, featuredImage, images, bannerImage, rowImages };
+    const priorShowcaseBlocks = existing?.showcaseBlocks?.length ? existing.showcaseBlocks : legacyColorShowcaseBlocks(existing);
+    const requestedShowcaseBlocks = color.showcaseBlocks === undefined ? priorShowcaseBlocks : color.showcaseBlocks;
+    const showcaseBlocks = await Promise.all(requestedShowcaseBlocks.map(async (block, blockIndex) => {
+      const priorBlock = priorShowcaseBlocks[blockIndex]?.type === block.type ? priorShowcaseBlocks[blockIndex] : null;
+      if (block.type === "banner") {
+        return { type: "banner", image: await resolveImageKeeping(block.image, [priorBlock?.image, ...existingImages].filter(Boolean)), images: [] };
+      }
+      return { type: "imageRow", image: null, images: await resolveImagesKeeping(block.images, [...(priorBlock?.images || []), ...existingImages].filter(Boolean)) };
+    }));
+    return { ...color, featuredImage, images, bannerImage, rowImages, showcaseBlocks };
   }));
 }
 
@@ -244,6 +261,7 @@ export function publicProduct(p, { includeContentBlocks = false } = {}) {
       name: color.name, hex: color.hex, featuredImage: color.featuredImage || null, images: color.images || [],
       bannerImage: color.bannerImage || null,
       rowImages: { image1: color.rowImages?.image1 || null, image2: color.rowImages?.image2 || null, image3: color.rowImages?.image3 || null },
+      showcaseBlocks: color.showcaseBlocks?.length ? color.showcaseBlocks : legacyColorShowcaseBlocks(color),
     })),
     ...(includeContentBlocks ? {
       contentBlocks: (p.contentBlocks || []).map((block) => ({

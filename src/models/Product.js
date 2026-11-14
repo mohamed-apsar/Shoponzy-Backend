@@ -25,6 +25,12 @@ const variantSchema = new mongoose.Schema({
 });
 toJSONPlugin(variantSchema);
 
+const variantShowcaseBlockSchema = new mongoose.Schema({
+  type: { type: String, enum: ["banner", "imageRow"], required: true },
+  image: { type: imageSchema, default: null },
+  images: { type: [imageSchema], default: [] },
+}, { _id: false });
+
 const colorSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 40 },
   hex: { type: String, match: /^#[0-9a-fA-F]{6}$/, required: true },
@@ -37,6 +43,7 @@ const colorSchema = new mongoose.Schema({
     image2: { type: imageSchema, default: null },
     image3: { type: imageSchema, default: null },
   },
+  showcaseBlocks: { type: [variantShowcaseBlockSchema], default: undefined },
 }, { _id: false });
 
 const productContentBlockSchema = new mongoose.Schema({

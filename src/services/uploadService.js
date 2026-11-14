@@ -133,6 +133,8 @@ export async function isReferenced(publicId) {
       { "colors.rowImages.image1.publicId": publicId },
       { "colors.rowImages.image2.publicId": publicId },
       { "colors.rowImages.image3.publicId": publicId },
+      { "colors.showcaseBlocks.image.publicId": publicId },
+      { "colors.showcaseBlocks.images.publicId": publicId },
       { "contentBlocks.image.publicId": publicId },
       { "contentBlocks.images.publicId": publicId },
       { "seo.image.publicId": publicId },
