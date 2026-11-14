@@ -26,7 +26,7 @@ import { loginIpLimiter } from "../middleware/rateLimits.js";
 import { audit } from "../models/AuditLog.js";
 import { ok } from "../utils/respond.js";
 import { objectId } from "../validators/common.js";
-import { adminProductsQuery, bulkProductsSchema, createCategorySchema, createProductSchema, listCategoriesQuery, productBadgesSchema, stockAdjustSchema, updateCategorySchema, updateProductSchema } from "../validators/catalogValidators.js";
+import { adminProductsQuery, bulkDeleteCategoriesSchema, bulkProductsSchema, createCategorySchema, createProductSchema, listCategoriesQuery, productBadgesSchema, stockAdjustSchema, updateCategorySchema, updateProductSchema } from "../validators/catalogValidators.js";
 import { adminOrdersQuery, cancelSchema, createCouponSchema, listQuery, refundSchema, refundsQuery, transactionsQuery, updateCouponSchema, updateFulfilmentSchema, updateOrderStatusSchema } from "../validators/commerceValidators.js";
 import { contactStatusSchema, createBannerSchema, createPageSchema, createPopupSchema, createSectionSchema, notFoundRedirectSchema, reorderSchema, updateBannerSchema, updatePageSchema, updatePopupSchema, updateSectionSchema } from "../validators/contentValidators.js";
 import { authRouter } from "./authRoutes.js";
@@ -80,6 +80,7 @@ router.get("/categories", validate({ query: listCategoriesQuery }), catalog.list
 router.get("/categories/tree", catalog.categoryTree);
 router.post("/categories", validate({ body: createCategorySchema }), catalog.createCategory);
 router.patch("/categories/:id", id, validate({ body: updateCategorySchema }), catalog.updateCategory);
+router.post("/categories/bulk-delete", validate({ body: bulkDeleteCategoriesSchema }), catalog.bulkDeleteCategories);
 router.delete("/categories/:id", id, catalog.deleteCategory);
 
 /* Products & inventory */

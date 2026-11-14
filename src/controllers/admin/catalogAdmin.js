@@ -78,6 +78,13 @@ export async function deleteCategory(req, res) {
   ok(res, { deleted: true });
 }
 
+export async function bulkDeleteCategories(req, res) {
+  const results = await categories.bulkDeleteCategories([...new Set(req.valid.body.ids)]);
+  const deleted = results.filter((r) => r.ok);
+  if (deleted.length) await log(req, "category.bulk_deleted", "Category", null, { ids: deleted.map((r) => r.id), count: deleted.length });
+  ok(res, { results, succeeded: deleted.length });
+}
+
 /* ---------- Products ---------- */
 const PRODUCT_SORTS = { newest: { createdAt: -1 }, oldest: { createdAt: 1 }, name: { name: 1 }, price_low: { minPrice: 1 }, price_high: { minPrice: -1 }, stock_low: { totalStock: 1 } };
 

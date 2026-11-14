@@ -129,6 +129,9 @@ export const stockAdjustSchema = z.object({
   // Stock the admin saw when opening the form; the change is refused if it has moved since.
   expectedStock: z.number().int().min(0).optional(),
 }).strict().refine((v) => (v.delta === undefined) !== (v.set === undefined), "Send either delta or set.");
+export const bulkDeleteCategoriesSchema = z.object({
+  ids: z.array(objectId).min(1).max(200),
+}).strict();
 export const bulkProductsSchema = z.object({
   ids: z.array(objectId).min(1).max(200),
   action: z.enum(["activate", "disable", "archive", "delete"]),

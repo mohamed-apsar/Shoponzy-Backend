@@ -63,6 +63,23 @@ describe("admin categories", () => {
     await Product.deleteOne({ _id: p._id });
     await admin.del(`/admin/categories/${sneakers._id}`).expect(200);
   });
+
+  it("bulk-deletes deepest first and reports the ones it can't delete", async () => {
+    const bags = await category("Bags");
+    const totes = await category("Totes", bags._id);
+    const clutch = await category("Clutch", bags._id);
+    const watches = await category("Watches");
+    const analog = await category("Analog", watches._id);
+    await Product.create({ name: "Kept", slug: "kept", category: analog._id, categoryPath: [watches._id, analog._id], variants: [{ price: 1, stock: 1 }] });
+
+    const res = await admin.post("/admin/categories/bulk-delete", { ids: [String(bags._id), String(totes._id), String(clutch._id), String(analog._id)] }).expect(200);
+    expect(res.body.data.succeeded).toBe(3);
+    const failed = res.body.data.results.filter((r) => !r.ok);
+    expect(failed).toEqual([expect.objectContaining({ id: String(analog._id), error: expect.stringMatching(/product/) })]);
+    expect(await Category.exists({ _id: bags._id })).toBeNull();
+    expect(await Category.exists({ _id: analog._id })).toBeTruthy();
+    await admin.post("/admin/categories/bulk-delete", { ids: [] }).expect(400);
+  });
 });
 
 describe("admin products", () => {
@@ -254,7 +271,8 @@ describe("admin products", () => {
     expect(destroyed).toEqual([banner.publicId]);
 
     await admin.del(`/admin/products/${created.body.data.id}`).expect(200);
-    expect(destroyed).toEqual([banner.publicId, replacement.publicId, ...rowImages.map((image) => image.publicId)]);
+    // Images released in one save are cleaned up in parallel, so compare without order.
+    expect([...destroyed].sort()).toEqual([banner.publicId, replacement.publicId, ...rowImages.map((image) => image.publicId)].sort());
   });
 
   it("requires exactly three uploaded images for each product image row", async () => {

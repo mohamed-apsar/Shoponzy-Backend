@@ -124,6 +124,23 @@ export async function deleteCategory(id) {
   await releaseImages(imageIds(cat.image, cat.productImage, cat.exploreImage, cat.bannerImage, galleryImages(cat)));
 }
 
+/* Deletes several categories, deepest first, so a parent selected together with its children goes too.
+   Each one still follows deleteCategory's rules; failures are reported per id instead of stopping the batch. */
+export async function bulkDeleteCategories(ids) {
+  const cats = await Category.find({ _id: { $in: ids } }).select("_id name level").lean();
+  const found = new Set(cats.map((c) => String(c._id)));
+  const results = ids.filter((id) => !found.has(String(id))).map((id) => ({ id, ok: false, error: "Category not found." }));
+  for (const cat of cats.sort((a, b) => b.level - a.level)) {
+    try {
+      await deleteCategory(cat._id);
+      results.push({ id: String(cat._id), name: cat.name, ok: true });
+    } catch (err) {
+      results.push({ id: String(cat._id), name: cat.name, ok: false, error: err.message });
+    }
+  }
+  return results;
+}
+
 /* Ids of disabled categories and everything below them: their products are hidden from the storefront. */
 export async function hiddenCategoryIds() {
   const disabled = await Category.find({ status: "disabled" }).select("_id").lean();
