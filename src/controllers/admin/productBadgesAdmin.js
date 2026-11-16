@@ -7,7 +7,7 @@ export async function list(_req, res) {
 }
 
 export async function save(req, res) {
-  const values = await badges.saveProductBadges(req.valid.body.badges);
+  const result = await badges.saveProductBadges(req.valid.body.badges, { clearAssigned: req.valid.body.clearAssigned });
   await audit("product_badges.updated", { actor: req.auth.user._id, entity: "SiteSetting", entityId: "productBadges", ip: req.ip });
-  ok(res, { badges: values });
+  ok(res, result);
 }

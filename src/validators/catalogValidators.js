@@ -138,6 +138,7 @@ export const bulkProductsSchema = z.object({
 }).strict();
 export const productBadgesSchema = z.object({
   badges: z.array(z.string().trim().min(1).max(40)).max(30),
+  clearAssigned: z.boolean().optional().default(false),
 }).strict().superRefine(({ badges }, ctx) => {
   const normalized = badges.map((badge) => badge.toLowerCase());
   if (new Set(normalized).size !== normalized.length) ctx.addIssue({ code: "custom", path: ["badges"], message: "Badge names must be unique." });

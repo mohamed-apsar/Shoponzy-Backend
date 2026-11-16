@@ -10,15 +10,22 @@ export async function getProductBadges() {
   return setting?.value?.badges ?? DEFAULT_BADGES;
 }
 
-export async function saveProductBadges(badges) {
+export async function saveProductBadges(badges, { clearAssigned = false } = {}) {
   const previous = await getProductBadges();
   const removed = previous.filter((badge) => !badges.includes(badge));
+  let clearedProducts = 0;
   if (removed.length) {
     const assigned = await Product.distinct("badge", { badge: { $in: removed } });
-    if (assigned.length) throw AppError.conflict(`Remove these badges from products before deleting them: ${assigned.join(", ")}.`);
+    if (assigned.length && !clearAssigned) {
+      throw AppError.conflict(`These badges are still assigned to products: ${assigned.join(", ")}. Confirm removal to clear them from those products.`);
+    }
+    if (assigned.length) {
+      const result = await Product.updateMany({ badge: { $in: removed } }, { $set: { badge: "" } });
+      clearedProducts = result.modifiedCount ?? result.nModified ?? 0;
+    }
   }
   await SiteSetting.updateOne({ key: SETTING_KEY }, { $set: { value: { badges } } }, { upsert: true });
-  return badges;
+  return { badges, clearedProducts };
 }
 
 export async function validateProductBadge(badge) {
