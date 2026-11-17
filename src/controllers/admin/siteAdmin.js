@@ -20,7 +20,7 @@ export async function dashboard(req, res) {
 const IMAGE_KEYS = ["logo", "footerLogo", "favicon", "headerLogo", "shareImage", "illustration"];
 const settingImageIds = (section, value) => imageIds(
   ...IMAGE_KEYS.map((key) => value[key]),
-  ...(section === "homeCategories" ? [value.newInImage] : []),
+  ...(section === "homeCategories" ? [value.newInImage, value.shopAllBanner] : []),
 );
 
 export const allSettings = async (_req, res) => ok(res, await settings.getAllSettings());
@@ -33,6 +33,9 @@ export async function updateSettings(req, res) {
   for (const key of IMAGE_KEYS) if (patch[key] !== undefined) patch[key] = await resolveImageKeeping(patch[key], current[key]);
   if (section === "homeCategories" && patch.newInImage !== undefined) {
     patch.newInImage = await resolveImageKeeping(patch.newInImage, current.newInImage);
+  }
+  if (section === "homeCategories" && patch.shopAllBanner !== undefined) {
+    patch.shopAllBanner = await resolveImageKeeping(patch.shopAllBanner, current.shopAllBanner);
   }
   const { value, previous } = await settings.updateSection(section, patch);
   await audit("settings.updated", { actor: req.auth.user._id, entity: "SiteSetting", entityId: section, ip: req.ip, meta: { fields: Object.keys(patch) } });

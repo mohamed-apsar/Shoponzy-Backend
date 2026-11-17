@@ -12,6 +12,25 @@ beforeEach(async () => { admin = await adminBrowser(); });
 const pub = (path) => request(app).get(API + path);
 
 describe("Manage Site settings", () => {
+  it("saves, replaces and removes the Shop All banner independently of the circle image", async () => {
+    const { destroyed } = mockCloudinary();
+    const png = Buffer.concat([Buffer.from("89504e470d0a1a0a0000000d", "hex"), Buffer.alloc(64)]);
+    const upload = async () => (await admin.agent.post(`${API}/admin/uploads`).set("X-CSRF-Token", admin.token)
+      .field("kind", "categoryBanner").attach("file", png, "banner.png").expect(201)).body.data;
+    const circle = await upload(), first = await upload(), replacement = await upload();
+    await admin.patch("/admin/site-settings/homeCategories", { newInImage: circle, shopAllBanner: first }).expect(200);
+    expect((await pub("/site-settings").expect(200)).body.data.homeCategories.shopAllBanner.url).toBe(first.url);
+    await admin.patch("/admin/site-settings/homeCategories", { shopAllBanner: replacement }).expect(200);
+    expect(destroyed).toContain(first.publicId);
+    const settings = (await pub("/site-settings").expect(200)).body.data.homeCategories;
+    expect(settings.newInImage.url).toBe(circle.url);
+    expect(settings.shopAllBanner.url).toBe(replacement.url);
+    await admin.patch("/admin/site-settings/homeCategories", { shopAllBanner: null }).expect(200);
+    expect((await pub("/site-settings").expect(200)).body.data.homeCategories.shopAllBanner).toBeNull();
+    expect(destroyed).toContain(replacement.publicId);
+    expect(destroyed).not.toContain(circle.publicId);
+  });
+
   it("defaults match the live storefront; saved changes appear on the public endpoint", async () => {
     const before = (await pub("/site-settings").expect(200)).body.data;
     expect(before.branding.primaryColor).toBe("#FF4D2E");
