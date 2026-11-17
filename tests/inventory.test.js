@@ -30,7 +30,7 @@ describe("inventory management", () => {
     await simpleProduct({ name: "Plenty", stock: 50, categoryName: "Bags" });
     await simpleProduct({ name: "None Left", stock: 0, categoryName: "Bags" });
 
-    const all = (await admin.get("/admin/inventory?limit=5").expect(200)).body;
+    const all = (await admin.get("/admin/inventory?limit=5&sort=stock_low").expect(200)).body;
     expect(all.meta).toMatchObject({ total: 8, pages: 2, lowStockThreshold: 5 });
     expect(all.data[0]).toMatchObject({ name: "None Left", stock: 0, stockStatus: "out", reserved: 0 }); // stock_low first
     expect(all.data[0].lastUpdated).toBeTruthy();
@@ -43,6 +43,38 @@ describe("inventory management", () => {
     const high = (await admin.get("/admin/inventory?sort=stock_high&limit=1").expect(200)).body.data[0];
     expect(high).toMatchObject({ name: "Plenty", stock: 50, stockStatus: "in", category: { name: "Bags" } });
     await admin.get("/admin/inventory?stockStatus=bogus").expect(400);
+  });
+
+  it("derives card totals from active variants, excluding archived products and inactive-only stockouts", async () => {
+    const mixed = await sneaker({ name: "Mixed", stock: 10 });
+    await Product.updateOne({ _id: mixed._id }, { $set: {
+      "variants.0.stock": 0, "variants.1.stock": 3,
+      "variants.2.status": "inactive", "variants.2.stock": 100,
+      totalStock: 999,
+    } });
+    const inactive = await simpleProduct({ name: "Inactive variants", stock: 50 });
+    await Product.updateOne({ _id: inactive._id }, { $set: { "variants.0.status": "inactive", totalStock: 0 } });
+    await simpleProduct({ name: "Empty", stock: 0 });
+    await simpleProduct({ name: "Archived", stock: 20, status: "archived" });
+    const summary = (await admin.get("/admin/inventory/summary").expect(200)).body.data;
+    expect(summary).toMatchObject({ totalProducts: 3, totalStock: 33, totalVariants: 6,
+      lowStockProducts: 1, lowStockVariants: 1, outOfStockProducts: 1, outOfStockVariants: 2, reservedUnits: 0 });
+    const rows = (await admin.get("/admin/inventory?limit=100").expect(200)).body.data;
+    expect(rows.filter((r) => r.variantStatus === "active").reduce((sum, r) => sum + r.stock, 0)).toBe(summary.totalStock);
+  });
+
+  it("lists newest products first across pages, regardless of stock or later updates", async () => {
+    const old = await simpleProduct({ name: "Older", stock: 1 });
+    const recent = await sneaker({ name: "Newer", stock: 30 });
+    await Product.collection.updateOne({ _id: old._id }, { $set: { createdAt: new Date("2026-01-01"), updatedAt: new Date("2026-12-01") } });
+    await Product.collection.updateOne({ _id: recent._id }, { $set: { createdAt: new Date("2026-02-01") } });
+    const first = (await admin.get("/admin/inventory?limit=3").expect(200)).body;
+    const second = (await admin.get("/admin/inventory?limit=3&page=2&sort=newest").expect(200)).body;
+    expect(first.meta.total).toBe(7);
+    expect([...first.data, ...second.data].every((r) => r.productId === String(recent._id))).toBe(true);
+    expect(new Set([...first.data, ...second.data].map((r) => r.variantId)).size).toBe(6);
+    expect((await admin.get("/admin/inventory?limit=3&page=3").expect(200)).body.data[0].productId).toBe(String(old._id));
+    expect((await admin.get("/admin/inventory?sort=stock_low").expect(200)).body.data[0].productId).toBe(String(old._id));
   });
 
   it("uses the configurable store threshold and per-product overrides", async () => {

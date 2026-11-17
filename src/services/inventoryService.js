@@ -20,7 +20,8 @@ export async function inventorySummary() {
   const [products] = await Product.aggregate([
     { $match: notArchived },
     { $project: {
-      totalStock: 1,
+      // Derive from live variants; cached product totals can lag stock writes.
+      totalStock: { $sum: { $map: { input: { $filter: { input: "$variants", as: "v", cond: { $eq: ["$$v.status", "active"] } } }, as: "v", in: "$$v.stock" } } },
       activeVariants: { $size: { $filter: { input: "$variants", as: "v", cond: { $eq: ["$$v.status", "active"] } } } },
       outVariants: { $size: { $filter: { input: "$variants", as: "v", cond: { $and: [{ $eq: ["$$v.status", "active"] }, { $lte: ["$$v.stock", 0] }] } } } },
       lowVariants: { $size: lowVariantsExpr(threshold) },
@@ -33,7 +34,7 @@ export async function inventorySummary() {
       lowStockProducts: { $sum: { $cond: [{ $gt: ["$lowVariants", 0] }, 1, 0] } },
       lowStockVariants: { $sum: "$lowVariants" },
       // A product is out of stock when none of its active variants can be sold.
-      outOfStockProducts: { $sum: { $cond: [{ $lte: ["$totalStock", 0] }, 1, 0] } },
+      outOfStockProducts: { $sum: { $cond: [{ $and: [{ $gt: ["$activeVariants", 0] }, { $lte: ["$totalStock", 0] }] }, 1, 0] } },
       outOfStockVariants: { $sum: "$outVariants" },
     } },
   ]);
@@ -47,6 +48,7 @@ export async function inventorySummary() {
 }
 
 const STOCK_SORTS = {
+  newest: { createdAt: -1, _id: -1 },
   stock_low: { stock: 1, name: 1 },
   stock_high: { stock: -1, name: 1 },
   name: { name: 1, variantLabel: 1 },
@@ -54,7 +56,7 @@ const STOCK_SORTS = {
 };
 
 /* One row per variant (stock lives on variants). */
-export async function listStock({ q, category, stockStatus, productStatus, sort = "stock_low", page, limit }) {
+export async function listStock({ q, category, stockStatus, productStatus, sort = "newest", page, limit }) {
   const threshold = await getLowStockThreshold();
   const match = productStatus ? { status: productStatus } : { ...notArchived };
   if (category) match.categoryPath = new ObjectId(category);
@@ -82,7 +84,7 @@ export async function listStock({ q, category, stockStatus, productStatus, sort 
   pipeline.push({ $facet: {
     total: [{ $count: "n" }],
     items: [
-      { $sort: { ...STOCK_SORTS[sort], _id: 1 } }, { $skip: skip }, { $limit: limit },
+      { $sort: { ...STOCK_SORTS[sort], _id: STOCK_SORTS[sort]._id || 1, "variants._id": 1 } }, { $skip: skip }, { $limit: limit },
       { $lookup: { from: "categories", localField: "category", foreignField: "_id", as: "cat", pipeline: [{ $project: { name: 1, path: 1 } }] } },
       { $project: {
         _id: 0, productId: "$_id", variantId: "$variants._id", name: 1, brand: 1, slug: 1, productStatus: "$status",

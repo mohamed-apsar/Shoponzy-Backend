@@ -19,7 +19,7 @@ export const inventoryQuery = z.object({
   category: objectId.optional(),
   stockStatus: z.enum(["in", "low", "out", "inactive"]).optional(),
   productStatus: z.enum(PRODUCT_STATUSES).optional(),
-  sort: z.enum(["stock_low", "stock_high", "name", "updated"]).default("stock_low"),
+  sort: z.enum(["newest", "stock_low", "stock_high", "name", "updated"]).default("newest"),
 });
 
 export const movementsQuery = z.object({
