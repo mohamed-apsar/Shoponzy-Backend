@@ -12,6 +12,7 @@ export const GUEST_CART_COOKIE = "sz_cart";
 export const newGuestId = () => crypto.randomBytes(24).toString("base64url");
 
 const ownerQuery = (owner) => (owner.userId ? { user: owner.userId } : { guestId: owner.guestId });
+const stockLabel = (product, variant) => `${product.name} (${[variant.color, variant.size && `size ${variant.size}`].filter(Boolean).join(", ") || "selected option"})`;
 
 export async function getCart(owner, { create = false } = {}) {
   if (!owner.userId && !owner.guestId) return create ? null : { items: [], couponCode: null };
@@ -28,12 +29,12 @@ async function loadVariant(productId, variantId) {
 }
 
 export async function addItem(owner, { productId, variantId, qty }) {
-  const { variant } = await loadVariant(productId, variantId);
-  if (variant.stock < 1) throw new AppError(409, "OUT_OF_STOCK", "Sorry, this size is out of stock.");
+  const { product, variant } = await loadVariant(productId, variantId);
+  if (variant.stock < 1) throw new AppError(409, "OUT_OF_STOCK", `Sorry, ${stockLabel(product, variant)} is out of stock.`);
   const cart = await getCart(owner, { create: true });
   const line = cart.items.find((i) => String(i.product) === String(productId) && String(i.variant) === String(variantId));
   const wanted = Math.min(MAX_LINE_QTY, (line?.qty || 0) + qty);
-  if (wanted > variant.stock) throw new AppError(409, "INSUFFICIENT_STOCK", `Only ${variant.stock} left in this size.`);
+  if (wanted > variant.stock) throw new AppError(409, "INSUFFICIENT_STOCK", `Only ${variant.stock} left for ${stockLabel(product, variant)}. Please reduce the quantity in your bag.`);
   if (line) line.qty = wanted;
   else cart.items.push({ product: productId, variant: variantId, qty: wanted });
   await cart.save();
@@ -44,8 +45,10 @@ export async function updateItem(owner, itemId, qty) {
   const cart = await getCart(owner);
   const line = cart.items?.find?.((i) => String(i._id) === itemId);
   if (!line) throw AppError.notFound("That item is no longer in your bag.");
-  const { variant } = await loadVariant(line.product, line.variant);
-  if (qty > variant.stock) throw new AppError(409, "INSUFFICIENT_STOCK", `Only ${variant.stock} left in this size.`);
+  const { product, variant } = await loadVariant(line.product, line.variant);
+  if (qty > variant.stock) throw new AppError(409, "INSUFFICIENT_STOCK", variant.stock < 1
+    ? `Sorry, ${stockLabel(product, variant)} is out of stock.`
+    : `Only ${variant.stock} left for ${stockLabel(product, variant)}. Please reduce the quantity in your bag.`);
   line.qty = qty;
   await cart.save();
   return cart;

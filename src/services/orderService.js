@@ -52,7 +52,7 @@ async function takeStock(items, orderId, session) {
       { session, new: true, projection: { variants: { $elemMatch: { _id: it.variant } } } },
     ).lean();
     if (!updated) {
-      throw new AppError(409, "OUT_OF_STOCK", `Sorry, ${it.name}${it.size ? ` (${it.size})` : ""} just sold out or has fewer items left. Please review your bag.`, [{ path: String(it.variant), message: "insufficient_stock" }]);
+      throw new AppError(409, "OUT_OF_STOCK", `Sorry, ${it.name} (${[it.color, it.size && `size ${it.size}`].filter(Boolean).join(", ") || "selected option"}) just sold out or has fewer items left. Please review your bag.`, [{ path: String(it.variant), message: "insufficient_stock" }]);
     }
     const after = updated.variants[0].stock;
     moves.push({ product: it.product, variant: it.variant, sku: it.sku, delta: -it.qty, before: after + it.qty, after, reason: "order", order: orderId });
@@ -107,7 +107,10 @@ export async function createOrder({ owner, input, ip }) {
   } : savedCart;
   if (!cart.items?.length) throw new AppError(400, "CART_EMPTY", "Your bag is empty.");
   const priced = await priceCart(cart, { userId: owner.userId, phone: input.contact.phone });
-  if (priced.hasIssues) throw new AppError(409, "CART_ISSUES", "Some items in your bag are unavailable. Please review your bag.", priced.lines.filter((l) => !l.available).map((l) => ({ path: l.itemId, message: l.message })));
+  if (priced.hasIssues) throw new AppError(409, "CART_ISSUES", "Some items in your bag are unavailable. Please review your bag.", priced.lines.filter((l) => !l.available).map((l, index) => ({
+    path: l.itemId,
+    message: `${l.name || `Item ${index + 1}`} (${[l.color, l.size && `size ${l.size}`].filter(Boolean).join(", ") || "selected option"}): ${l.message}.`,
+  })));
   if (priced.coupon && !priced.coupon.applied && !/more to use/.test(priced.coupon.message)) throw new AppError(409, "COUPON_INVALID", priced.coupon.message);
 
   const commerce = await getSection("commerce");

@@ -12,6 +12,20 @@ const stockOf = async (productId, variantId) => (await Product.findById(productI
 const checkout = (b, extra = {}) => b.post("/orders", { contact: CONTACT, shippingAddress: ADDRESS, paymentMethod: "cod", idempotencyKey: key(), ...extra });
 
 describe("cart", () => {
+  it("names the product, colour and size when stock runs out during checkout", async () => {
+    const s = await sneaker({ stock: 2 });
+    const v = variantOf(s, "White", "8");
+    const b = await browser();
+    const payload = { productId: String(s._id), variantId: String(v._id), qty: 1 };
+    const cart = (await b.post("/cart/items", payload).expect(200)).body.data;
+    await Product.updateOne({ _id: s._id, "variants._id": v._id }, { $set: { "variants.$.stock": 0 } });
+    const label = `${s.name} (White, size 8)`;
+    expect((await b.post("/cart/items", payload).expect(409)).body.error.message).toContain(`${label} is out of stock`);
+    expect((await b.patch(`/cart/items/${cart.lines[0].itemId}`, { qty: 2 }).expect(409)).body.error.message).toContain(`${label} is out of stock`);
+    const result = await checkout(b).expect(409);
+    expect(result.body.error.details[0].message).toBe(`${label}: Out of stock.`);
+  });
+
   it("guests get a bag cookie; the server prices lines from the database", async () => {
     const s = await sneaker({ price: 1299, mrp: 2499 });
     const v = variantOf(s, "White", "8");
@@ -30,7 +44,7 @@ describe("cart", () => {
     const v = variantOf(s, "Black", "7");
     const b = await browser();
     await b.post("/cart/items", { productId: String(s._id), variantId: String(v._id), qty: 2 }).expect(200);
-    expect((await b.post("/cart/items", { productId: String(s._id), variantId: String(v._id), qty: 2 }).expect(409)).body.error.message).toBe("Only 3 left in this size.");
+    expect((await b.post("/cart/items", { productId: String(s._id), variantId: String(v._id), qty: 2 }).expect(409)).body.error.message).toBe(`Only 3 left for ${s.name} (Black, size 7). Please reduce the quantity in your bag.`);
     const cart = (await b.get("/cart").expect(200)).body.data;
     expect(cart.lines).toHaveLength(1);
     const itemId = cart.lines[0].itemId;
