@@ -59,7 +59,7 @@ export const updatePageSchema = pageBase.partial();
 /* ---------- Public forms ---------- */
 export const contactSchema = z.object({
   name, phone, email: z.union([email, z.literal("")]).optional().transform((v) => v || undefined),
-  topic: z.enum(["Order question", "Return / exchange", "Product question", "Something else"]).default("Something else"),
+  topic: z.preprocess((value) => value === "Return / exchange" ? "Return / Refund" : value, z.enum(["Order question", "Return / Refund", "Product question", "Something else"]).default("Something else")),
   orderNumber: z.union([z.string().trim().toUpperCase().regex(/^SZ\d{6,9}$/, "Check the order ID."), z.literal("")]).optional().transform((v) => v || undefined),
   message: z.string().trim().min(5, "Tell us a little more.").max(3000),
 }).strict();

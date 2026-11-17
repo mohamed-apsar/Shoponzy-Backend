@@ -12,7 +12,7 @@ export const wishlistAddSchema = z.object({ productId: objectId }).strict();
 export const wishlistMergeSchema = z.object({ productIds: z.array(objectId).max(100) }).strict();
 export const createSupportTicketSchema = z.object({
   subject: z.string().trim().min(3, "Enter a short subject.").max(120),
-  type: z.enum(["Website problem", "Order issue", "Payment issue", "Delivery issue", "Return / exchange", "Product question", "Other"]),
+  type: z.preprocess((value) => value === "Return / exchange" ? "Return / Refund" : value, z.enum(["Order issue", "Payment issue", "Delivery issue", "Return / Refund", "Product question", "Other"])),
   priority: z.enum(["low", "medium", "high"]),
   message: z.string().trim().min(10, "Describe the issue in at least 10 characters.").max(3000),
   attachment: z.object({ publicId: z.string().trim().min(1).max(200), filename: z.string().trim().min(1).max(200) }).strict().optional(),
