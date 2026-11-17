@@ -262,13 +262,16 @@ export async function markPaid(order, { providerPaymentId, method, details, amou
   const now = new Date();
   if (order.stockReserved) {
     const updated = await Order.findOneAndUpdate(
-      { _id: order._id, paymentStatus: { $ne: "paid" } },
+      { _id: order._id, paymentStatus: { $ne: "paid" }, stockReserved: true },
       { $set: { paymentStatus: "paid", status: order.status === "pending_payment" ? "placed" : order.status, placedAt: order.placedAt || now, reservationExpiresAt: null },
         $push: { history: { status: "placed", note: `Payment received (${via})`, at: now } } },
       { new: true },
     );
     if (updated) sendOrderEmail(updated, "confirmation");
-    return updated || Order.findById(order._id);
+    if (updated) return updated;
+    // Dismissal may have released the reservation while the gateway was confirming payment.
+    const current = await Order.findById(order._id);
+    return markPaid(current, { providerPaymentId, method, details, amountPaise, via });
   }
 
   // Paid after the reservation expired: try to take the stock again.
@@ -303,10 +306,24 @@ export async function recordPaymentFailure(providerOrderId, { providerPaymentId,
 }
 
 /* ---------- Cancellation ---------- */
-export async function cancelOrder(orderId, { reason, by, byCustomer = false, system = false, force = false }) {
+export async function abandonPayment(order) {
+  if (order.paymentMethod !== "razorpay" || order.status !== "pending_payment") return order;
+  const payment = await Payment.findOne({ order: order._id, provider: "razorpay" }).sort({ createdAt: -1 });
+  if (payment?.providerOrderId) {
+    const attempts = await getRazorpay().fetchOrderPayments(payment.providerOrderId);
+    let paid = attempts.find((attempt) => attempt.status === "captured");
+    const authorized = attempts.find((attempt) => attempt.status === "authorized");
+    if (!paid && authorized) paid = await getRazorpay().capturePayment(authorized.id, toPaise(order.total), "INR");
+    if (paid) return markPaid(order, { providerPaymentId: paid.id, amountPaise: paid.amount, method: paid.method, details: paymentMethodDetails(paid), via: "checkout dismissal" });
+  }
+  return cancelOrder(order._id, { reason: "Online payment cancelled by customer", system: true, pendingPaymentOnly: true });
+}
+
+export async function cancelOrder(orderId, { reason, by, byCustomer = false, system = false, force = false, pendingPaymentOnly = false }) {
   return inTransaction(async (session) => {
     const order = await Order.findById(orderId).session(session);
     if (!order) throw AppError.notFound("Order not found.");
+    if (pendingPaymentOnly && (order.status !== "pending_payment" || order.paymentStatus === "paid")) return order;
     const allowed = byCustomer ? CUSTOMER_CANCELLABLE : TRANSITIONS[order.status];
     if (!force && !allowed.includes(byCustomer ? order.status : "cancelled")) {
       throw new AppError(409, "INVALID_TRANSITION", byCustomer ? "This order can no longer be cancelled online. Please contact us." : `A ${order.status.replace("_", " ")} order can't be cancelled.`);

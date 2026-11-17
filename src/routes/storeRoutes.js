@@ -61,6 +61,7 @@ r.post("/orders/track", trackLimiter, validate({ body: trackOrderSchema }), orde
 r.get("/orders", authenticate("customer"), cartOwner(), validate({ query: myOrdersQuery }), orders.myOrders);
 r.get("/orders/:orderNumber", optionalAuth("customer"), cartOwner(), orders.myOrder);
 r.post("/orders/:orderNumber/cancel", optionalAuth("customer"), cartOwner(), validate({ body: cancelSchema }), orders.cancelMyOrder);
+r.post("/orders/:orderNumber/abandon-payment", optionalAuth("customer"), cartOwner(), orders.abandonPayment);
 /* ---------- Returns (own orders: signed-in customer, or the guest browser that ordered) ---------- */
 const evidenceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: UPLOAD_KINDS.returnEvidence.maxBytes, files: 1, fields: 2 } });
 r.get("/orders/:orderNumber/returns", optionalAuth("customer"), cartOwner(), returns.orderReturns);

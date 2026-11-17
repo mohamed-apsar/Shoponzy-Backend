@@ -67,6 +67,12 @@ export async function cancelMyOrder(req, res) {
   ok(res, orders.customerOrderView(updated));
 }
 
+export async function abandonPayment(req, res) {
+  const order = await findOwnOrder(req);
+  const updated = await orders.abandonPayment(order);
+  ok(res, { order: orders.customerOrderView(updated) });
+}
+
 /* Guests (and anyone) can check status with order ID + the phone number used at checkout. Limited view. */
 export async function track(req, res) {
   const { orderNumber, phone } = req.valid.body;

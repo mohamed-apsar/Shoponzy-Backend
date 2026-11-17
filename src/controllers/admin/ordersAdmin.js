@@ -11,6 +11,8 @@ import { MAX_EXPORT_ROWS, csvDate, sendCsv } from "../../utils/csv.js";
 export async function listOrders(req, res) {
   const { q, status, paymentStatus, paymentMethod, attention, from, to, customer, ...pageQ } = req.valid.query;
   const filter = {};
+  const visibility = !status && !attention ? { $nor: [{ paymentMethod: "razorpay", paymentStatus: { $in: ["pending", "failed"] }, status: { $in: ["pending_payment", "cancelled"] }, refundRequired: { $ne: true }, needsAttention: null }] } : {};
+  Object.assign(filter, visibility);
   if (status) filter.status = status;
   if (paymentStatus) filter.paymentStatus = paymentStatus;
   if (paymentMethod) filter.paymentMethod = paymentMethod;
@@ -25,7 +27,7 @@ export async function listOrders(req, res) {
   const [items, total, counts] = await Promise.all([
     Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).select("-history"),
     Order.countDocuments(filter),
-    Order.aggregate([{ $group: { _id: "$status", n: { $sum: 1 } } }]),
+    Order.aggregate([{ $match: visibility }, { $group: { _id: "$status", n: { $sum: 1 } } }]),
   ]);
   ok(res, items, { ...meta(total), statusCounts: Object.fromEntries(counts.map((c) => [c._id, c.n])) });
 }

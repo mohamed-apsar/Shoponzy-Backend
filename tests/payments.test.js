@@ -33,6 +33,45 @@ function webhook(event, { secret = "test_webhook_secret", eventId = `evt_${crypt
 const capturedEvent = (pay) => ({ event: "payment.captured", payload: { payment: { entity: pay } }, created_at: 1 });
 
 describe("Razorpay checkout", () => {
+  it("releases stock immediately on dismissal, is repeatable, and hides unpaid attempts from default admin orders", async () => {
+    const { b, product, order } = await startOnlineCheckout();
+    const admin = await adminBrowser();
+    expect((await admin.get("/admin/orders").expect(200)).body.data.some((o) => o.orderNumber === order.orderNumber)).toBe(false);
+    const cancel = () => b.post(`/orders/${order.orderNumber}/abandon-payment`, {});
+    expect((await cancel().expect(200)).body.data.order.status).toBe("cancelled");
+    expect(await stockOf(product)).toBe(5);
+    await cancel().expect(200);
+    expect(await stockOf(product)).toBe(5);
+    expect((await admin.get("/admin/orders").expect(200)).body.data.some((o) => o.orderNumber === order.orderNumber)).toBe(false);
+    expect((await admin.get("/admin/orders?status=cancelled").expect(200)).body.data.some((o) => o.orderNumber === order.orderNumber)).toBe(true);
+  });
+
+  it("does not let a different guest release stock and preserves a payment captured before dismissal", async () => {
+    const { b, product, order, payment } = await startOnlineCheckout();
+    const other = await browser();
+    await other.post(`/orders/${order.orderNumber}/abandon-payment`, {}).expect(404);
+    expect(await stockOf(product)).toBe(4);
+    rzp.client.pay(payment.razorpayOrderId);
+    const result = await b.post(`/orders/${order.orderNumber}/abandon-payment`, {}).expect(200);
+    expect(result.body.data.order).toMatchObject({ paymentStatus: "paid", status: "placed" });
+    expect(await stockOf(product)).toBe(4);
+  });
+
+  it("reconciles authorized payments and late captures without losing their stock", async () => {
+    const first = await startOnlineCheckout();
+    rzp.client.pay(first.payment.razorpayOrderId, { status: "authorized" });
+    const result = await first.b.post(`/orders/${first.order.orderNumber}/abandon-payment`, {}).expect(200);
+    expect(result.body.data.order).toMatchObject({ paymentStatus: "paid", status: "placed" });
+    expect(await stockOf(first.product)).toBe(4);
+
+    const late = await startOnlineCheckout();
+    await late.b.post(`/orders/${late.order.orderNumber}/abandon-payment`, {}).expect(200);
+    expect(await stockOf(late.product)).toBe(5);
+    const pay = rzp.client.pay(late.payment.razorpayOrderId);
+    await late.b.post("/payments/razorpay/verify", verifyBody(late.order, late.payment.razorpayOrderId, pay)).expect(200);
+    expect(await stockOf(late.product)).toBe(4);
+  });
+
   it("reserves stock, applies the prepaid discount and returns the Checkout payload", async () => {
     const { product, order, payment } = await startOnlineCheckout({ price: 1000 });
     expect(order).toMatchObject({ status: "pending_payment", paymentStatus: "pending", prepaidDiscount: 50, shippingFee: 0, total: 950 }); // ₹1000 ≥ ₹999 → free delivery; −5% prepaid
