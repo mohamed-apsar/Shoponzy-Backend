@@ -22,6 +22,9 @@ export const couponSchema = z.object({ code: z.string().trim().toUpperCase().max
 
 /* ---------- Checkout ---------- */
 export const checkoutSchema = z.object({
+  items: z.array(addCartItemSchema).min(1).max(100).refine((items) => new Set(items.map((item) => `${item.productId}:${item.variantId}`)).size === items.length, "Choose each product option only once.").optional(),
+  checkoutMode: z.enum(["cart", "buy-now"]).optional(),
+  couponCode: z.string().trim().toUpperCase().max(30).nullable().optional(),
   contact: z.object({ name, email: z.union([email, z.literal("")]).optional().transform((v) => v || undefined), phone }).strict(),
   shippingAddress: addressSchema.omit({ label: true, isDefault: true }).optional(),
   addressId: objectId.optional(), // a saved address (signed-in customers)
@@ -30,7 +33,9 @@ export const checkoutSchema = z.object({
   notes: z.string().trim().max(500).optional(),
   // Client-generated per checkout attempt; resubmitting returns the same order instead of a duplicate.
   idempotencyKey: z.string().trim().regex(/^[A-Za-z0-9_-]{16,64}$/).optional(),
-}).strict().refine((v) => Boolean(v.shippingAddress) !== Boolean(v.addressId), { message: "Provide a delivery address.", path: ["shippingAddress"] });
+}).strict().refine((v) => Boolean(v.shippingAddress) !== Boolean(v.addressId), { message: "Provide a delivery address.", path: ["shippingAddress"] })
+  .refine((v) => !v.checkoutMode || Boolean(v.items), { message: "Choose items to check out.", path: ["items"] })
+  .refine((v) => v.checkoutMode !== "buy-now" || v.items?.length === 1, { message: "Buy Now requires one product option.", path: ["items"] });
 
 export const trackOrderSchema = z.object({ orderNumber: z.string().trim().toUpperCase().regex(/^SZ\d{6,9}$/, "Check the order ID."), phone }).strict();
 export const myOrdersQuery = z.object({ ...pagination });

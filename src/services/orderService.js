@@ -99,7 +99,12 @@ export async function createOrder({ owner, input, ip }) {
     if (existing) return { order: existing, payment: await paymentPayload(existing), replayed: true };
   }
 
-  const cart = await getCart(owner);
+  const savedCart = await getCart(owner);
+  const explicitItems = Boolean(input.items);
+  const cart = explicitItems ? {
+    items: input.items.map((item) => ({ _id: new mongoose.Types.ObjectId(), product: item.productId, variant: item.variantId, qty: item.qty })),
+    couponCode: input.couponCode !== undefined ? input.couponCode : savedCart.couponCode,
+  } : savedCart;
   if (!cart.items?.length) throw new AppError(400, "CART_EMPTY", "Your bag is empty.");
   const priced = await priceCart(cart, { userId: owner.userId, phone: input.contact.phone });
   if (priced.hasIssues) throw new AppError(409, "CART_ISSUES", "Some items in your bag are unavailable. Please review your bag.", priced.lines.filter((l) => !l.available).map((l) => ({ path: l.itemId, message: l.message })));
@@ -133,6 +138,7 @@ export async function createOrder({ owner, input, ip }) {
   const couponApplied = priced.coupon?.applied ? priced.coupon.code : null;
 
   let order;
+  let consumed = [];
   try {
     order = await inTransaction(async (session) => {
       const orderId = new mongoose.Types.ObjectId();
@@ -158,7 +164,24 @@ export async function createOrder({ owner, input, ip }) {
         history: [{ status: isCod ? "placed" : "pending_payment", note: isCod ? "Order placed (Cash on delivery)" : "Awaiting online payment", at: now }],
       }], { session });
       if (isCod) await Payment.create([{ order: orderId, provider: "cod", amount: totals.total, status: "pending" }], { session });
-      await Cart.updateOne({ _id: cart._id }, { $set: { items: [], couponCode: null } }, { session });
+      consumed = [];
+      if (!explicitItems) {
+        await Cart.updateOne({ _id: cart._id }, { $set: { items: [], couponCode: null } }, { session });
+      } else if (input.checkoutMode !== "buy-now" && savedCart._id) {
+        const current = await Cart.findById(savedCart._id).session(session);
+        if (current) {
+          for (const item of items) {
+            const line = current.items.find((line) => String(line.product) === String(item.product) && String(line.variant) === String(item.variant));
+            if (!line) continue;
+            const qty = Math.min(line.qty, item.qty);
+            consumed.push({ product: line.product, variant: line.variant, qty });
+            line.qty -= qty;
+          }
+          current.items = current.items.filter((line) => line.qty > 0);
+          if (!current.items.length) current.couponCode = null;
+          await current.save({ session });
+        }
+      }
       return created;
     });
   } catch (err) {
@@ -178,7 +201,21 @@ export async function createOrder({ owner, input, ip }) {
       // Gateway unreachable: undo the reservation and give the shopper their bag back.
       logger.error({ err: err?.message, orderNumber: order.orderNumber }, "Razorpay order creation failed");
       await cancelOrder(order._id, { reason: "Payment gateway unavailable", system: true });
-      await Cart.updateOne({ _id: cart._id }, { $set: { items: cart.items.map((i) => ({ product: i.product, variant: i.variant, qty: i.qty })), couponCode: cart.couponCode } });
+      if (!explicitItems) {
+        await Cart.updateOne({ _id: cart._id }, { $set: { items: cart.items.map((i) => ({ product: i.product, variant: i.variant, qty: i.qty })), couponCode: cart.couponCode } });
+      } else if (consumed.length) {
+        await inTransaction(async (session) => {
+          const current = await Cart.findById(savedCart._id).session(session);
+          if (!current) return;
+          for (const item of consumed) {
+            const line = current.items.find((line) => String(line.product) === String(item.product) && String(line.variant) === String(item.variant));
+            if (line) line.qty = Math.min(10, line.qty + item.qty);
+            else current.items.push(item);
+          }
+          if (!current.couponCode) current.couponCode = savedCart.couponCode;
+          await current.save({ session });
+        });
+      }
       throw new AppError(502, "PAYMENT_GATEWAY_ERROR", "We couldn't start the online payment. Your bag has been kept — please try again or choose Cash on delivery.");
     }
   } else if (order.contact.email) {
