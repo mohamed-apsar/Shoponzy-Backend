@@ -2,12 +2,27 @@ import { describe, expect, it } from "vitest";
 import { browser, useDb } from "./helpers.js";
 import { ADDRESS, CONTACT, customerBrowser, key, mockRazorpay, simpleProduct } from "./fixtures.js";
 import { Product } from "../src/models/Product.js";
+import { SiteSetting } from "../src/models/site.js";
 
 useDb();
 const item = (product, qty = 1) => ({ productId: String(product._id), variantId: String(product.variants[0]._id), qty });
 const submit = (b, items, extra = {}) => b.post("/orders", { contact: CONTACT, shippingAddress: ADDRESS, paymentMethod: "cod", items, checkoutMode: "cart", idempotencyKey: key(), ...extra });
 
 describe("checkout item selection", () => {
+  it.each([500, 1500])("charges the configured PIN rate for a ₹%i selection and rejects unsupported PIN codes", async (price) => {
+    await SiteSetting.create({ key: "shipping", value: {
+      states: [{ name: "Tamil Nadu", enabled: true, districts: [{ name: "Chennai", enabled: true }] }],
+      pincodes: [{ code: "625007", state: "Tamil Nadu", district: "Chennai", enabled: true, price: 40 }],
+    } });
+    const b = await browser();
+    const product = await simpleProduct({ price });
+    expect((await b.get("/site-settings").expect(200)).body.data.shipping.pincodes[0].price).toBe(40);
+    await submit(b, [item(product)], { checkoutMode: "buy-now", shippingAddress: { ...ADDRESS, pincode: "600043" } }).expect(400);
+    const order = (await submit(b, [item(product)], { checkoutMode: "buy-now", shippingAddress: { ...ADDRESS, pincode: "625007" } }).expect(201)).body.data.order;
+    expect(order.shippingFee).toBe(40);
+    expect(order.total).toBe(price + 40);
+  });
+
   it.each(["guest", "account"])("Buy Now orders one product without changing the %s bag, including the same variant", async (kind) => {
     const b = await (kind === "account" ? customerBrowser() : browser());
     const a = await simpleProduct({ name: "Bag item", price: 700, stock: 5 });
