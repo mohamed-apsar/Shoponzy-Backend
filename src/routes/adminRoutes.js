@@ -1,4 +1,5 @@
 import { Router } from "express";
+import * as actionAlerts from "../controllers/admin/actionAlerts.js";
 import multer from "multer";
 import { z } from "zod";
 import { authenticate, requireRole } from "../middleware/auth.js";
@@ -107,6 +108,8 @@ router.get("/inventory/movements/export.csv", validate({ query: movementsQuery }
 
 /* Orders & transactions */
 router.get("/orders", validate({ query: adminOrdersQuery }), orders.listOrders);
+router.get("/order-alerts", actionAlerts.list);
+router.patch("/orders/:id/review-cancellation", id, actionAlerts.reviewCancellation);
 router.get("/orders/:id", id, orders.getOrder);
 router.get("/orders/:id/invoice", id, orders.invoice);
 router.patch("/orders/:id/status", id, validate({ body: updateOrderStatusSchema }), orders.updateStatus);

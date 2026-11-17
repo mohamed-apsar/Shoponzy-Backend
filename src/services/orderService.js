@@ -337,6 +337,10 @@ export async function cancelOrder(orderId, { reason, by, byCustomer = false, sys
     if (order.paymentMethod === "cod") await Payment.updateOne({ order: order._id, provider: "cod" }, { $set: { status: "failed", errorDescription: "Order cancelled" } }, { session });
     order.status = "cancelled";
     order.cancelReason = reason;
+    if (byCustomer) {
+      order.customerCancelledAt = new Date();
+      order.cancellationReviewedAt = null;
+    }
     order.reservationExpiresAt = null;
     order.history.push({ status: "cancelled", note: reason, by, at: new Date() });
     await order.save({ session });

@@ -112,6 +112,8 @@ const orderSchema = new mongoose.Schema({
   },
   notes: { type: String, maxlength: 500 },
   cancelReason: String,
+  customerCancelledAt: Date,
+  cancellationReviewedAt: Date,
   history: [{ status: String, note: String, by: { type: ObjectId, ref: "User" }, at: { type: Date, default: Date.now }, _id: false }],
   idempotencyKey: String,
   placedAt: Date,

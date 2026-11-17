@@ -263,6 +263,13 @@ describe("order access, tracking and cancellation", () => {
     expect(res.body.data.status).toBe("cancelled");
     expect(await stockOf(w._id, w.variants[0]._id)).toBe(5);
     expect((await Coupon.findOne({ code: "TEN" })).usedCount).toBe(0);
+    const admin = await adminBrowser();
+    const alerts = (await admin.get("/admin/order-alerts").expect(200)).body.data;
+    expect(alerts.cancelledCount).toBe(1);
+    expect(alerts.cancellations[0].orderNumber).toBe(order.orderNumber);
+    await c.get("/admin/order-alerts").expect(401);
+    await admin.patch(`/admin/orders/${res.body.data.id}/review-cancellation`, {}).expect(200);
+    expect((await admin.get("/admin/order-alerts").expect(200)).body.data.cancelledCount).toBe(0);
     expect(await InventoryMovement.findOne({ reason: "order_cancelled" })).toMatchObject({ delta: 2 });
     await c.post(`/orders/${order.orderNumber}/cancel`, {}).expect(409);
   });

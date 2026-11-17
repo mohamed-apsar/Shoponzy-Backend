@@ -88,8 +88,12 @@ describe("customer return requests", () => {
     await (await browser()).get(`/orders/${order.orderNumber}/returns`).expect(404);
 
     const rr = (await requestReturn(b, order, { items: [{ variantId: String(walletVariant._id), qty: 1 }], reason: "damaged" }).expect(201)).body.data;
+    const alerts = (await admin.get("/admin/order-alerts").expect(200)).body.data;
+    expect(alerts.returnCount).toBe(1);
+    expect(alerts.returns[0]).toMatchObject({ returnNumber: rr.returnNumber, orderNumber: order.orderNumber });
     await stranger.post(`/returns/${rr.returnNumber}/cancel`, {}).expect(404);
     expect((await b.post(`/returns/${rr.returnNumber}/cancel`, {}).expect(200)).body.data.status).toBe("cancelled");
+    expect((await admin.get("/admin/order-alerts").expect(200)).body.data.returnCount).toBe(0);
     await b.post(`/returns/${rr.returnNumber}/cancel`, {}).expect(409);
   });
 
