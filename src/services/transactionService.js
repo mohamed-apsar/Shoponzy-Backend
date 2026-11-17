@@ -119,7 +119,7 @@ export async function transactionSummary(query) {
   const refund = (status) => refunds.find((r) => r._id === status) || { n: 0, amount: 0 };
   return {
     totalTransactions: byStatus.reduce((t, s) => t + s.n, 0),
-    successful: count(RECEIVED),
+    successful: count(DISPLAY_STATUSES.success),
     failed: count(DISPLAY_STATUSES.failed),
     pending: count(DISPLAY_STATUSES.pending),
     refundedTransactions: count(["refunded", "partially_refunded"]),

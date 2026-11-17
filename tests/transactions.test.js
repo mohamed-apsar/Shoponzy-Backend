@@ -87,6 +87,8 @@ describe("transactions & payments", () => {
     await webhook({ event: "refund.processed", payload: { refund: { entity: { id: refunds.data[0].refundId, payment_id: pay.id, status: "processed" } } } }).expect(200);
     summary = (await admin.get("/admin/transactions/summary").expect(200)).body.data;
     expect(summary).toMatchObject({ totalRefunded: 950, refundsPending: { count: 0 } });
+    expect(summary.successful).toBe(0);
+    expect(summary.totalAmount).toBe(950); // Gross receipts retain money subsequently refunded.
     const row = (await admin.get("/admin/transactions?status=refunded").expect(200)).body.data[0];
     expect(row).toMatchObject({ status: "refunded", refundedAmount: 950, refundStatus: "processed" });
     expect(row.refunds[0].processedAt).toBeTruthy();
@@ -104,6 +106,23 @@ describe("transactions & payments", () => {
     expect(lines[1]).toContain(",refunded,950,processed,");
     const all = (await admin.get("/admin/transactions/export.csv").expect(200)).text;
     expect(all).toContain("'=cmd|calc");
+  });
+
+  it("keeps summary cards scoped to provider, search, dates and payment method", async () => {
+    const paid = await paidOrder({ contact: { ...CONTACT, name: "Scoped Buyer", email: "scope@example.com" } }, { method: "upi" });
+    await onlineOrder();
+    const payment = await Payment.findOne({ providerPaymentId: paid.pay.id });
+    await Payment.create({ order: payment.order, provider: "cod", amount: 777, status: "captured" });
+    const scope = "/admin/transactions?provider=razorpay";
+    const all = (await admin.get(scope).expect(200)).body;
+    expect(all.meta.summary).toMatchObject({ totalTransactions: 2, successful: 1, failed: 0, pending: 1, totalAmount: 950 });
+    const filtered = (await admin.get(`${scope}&q=scope%40example&method=upi&status=failed`).expect(200)).body;
+    expect(filtered.data).toHaveLength(0);
+    expect(filtered.meta.summary).toMatchObject({ totalTransactions: 1, successful: 1, failed: 0, pending: 0, totalAmount: 950 });
+    const empty = (await admin.get(`${scope}&from=2000-01-01&to=2000-01-31`).expect(200)).body.meta.summary;
+    expect(empty).toMatchObject({ totalTransactions: 0, successful: 0, failed: 0, pending: 0, totalAmount: 0 });
+    const direct = (await admin.get("/admin/transactions/summary?provider=razorpay").expect(200)).body.data;
+    expect(direct).toEqual(all.meta.summary);
   });
 
   it("is admin-only, including exports", async () => {
