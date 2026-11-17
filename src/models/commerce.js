@@ -179,6 +179,7 @@ export const DEFAULT_RETURN_REASONS = [
   { code: "not_as_described", label: "Product not as described", active: true, requiresComment: false },
   { code: "missing_items", label: "Missing items", active: true, requiresComment: false },
   { code: "changed_mind", label: "Changed mind", active: true, requiresComment: false },
+  { code: "return_refund", label: "Return/Refund", active: true, requiresComment: false },
   { code: "other", label: "Other", active: true, requiresComment: true },
 ];
 export const RETURN_REASON_CODE = /^[a-z0-9_]{2,40}$/;

@@ -34,7 +34,11 @@ const PAID = ["paid", "partially_refunded"];
 
 /* ---------- Return reasons (admin-configurable) ---------- */
 export async function getReturnReasons() {
-  return (await getSection("returns")).reasons;
+  const reasons = (await getSection("returns")).reasons;
+  // Existing stores may have saved their reason list before Return/Refund was introduced.
+  return reasons.some((reason) => reason.code === "return_refund") ? reasons : [
+    ...reasons, { code: "return_refund", label: "Return/Refund", active: true, requiresComment: false },
+  ];
 }
 const reasonLabelOf = (reasons, code) => reasons.find((r) => r.code === code)?.label || code.replace(/_/g, " ");
 const slugCode = (label) => label.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);

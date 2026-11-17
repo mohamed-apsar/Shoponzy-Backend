@@ -117,10 +117,19 @@ describe("customer return requests", () => {
 });
 
 describe("return reasons", () => {
+  it("offers Return/Refund for existing saved lists and accepts the selected reason", async () => {
+    const { b, order, walletVariant } = await deliveredOrder();
+    await SiteSetting.updateOne({ key: "returns" }, { $set: { value: { reasons: [{ code: "damaged", label: "Damaged product", active: true, requiresComment: false }] } } }, { upsert: true });
+    const eligibility = (await b.get(`/orders/${order.orderNumber}/returns`).expect(200)).body.data.eligibility;
+    expect(eligibility.reasons.find((r) => r.code === "return_refund")).toMatchObject({ label: "Return/Refund" });
+    const rr = (await requestReturn(b, order, { items: [{ variantId: String(walletVariant._id), qty: 1 }], reason: "return_refund" }).expect(201)).body.data;
+    expect(rr.reasonLabel).toBe("Return/Refund");
+  });
+
   it("admins add, rename and disable reasons; customers see and use the active ones", async () => {
     const { b, order, walletVariant } = await deliveredOrder();
     const initial = (await admin.get("/admin/returns/reasons").expect(200)).body.data;
-    expect(initial.map((r) => r.code)).toEqual(["damaged", "wrong_item", "defective", "size_fit", "not_as_described", "missing_items", "changed_mind", "other"]);
+    expect(initial.map((r) => r.code)).toEqual(["damaged", "wrong_item", "defective", "size_fit", "not_as_described", "missing_items", "changed_mind", "return_refund", "other"]);
 
     const next = initial.map((r) => (r.code === "changed_mind" ? { ...r, active: false } : r.code === "damaged" ? { ...r, label: "Arrived damaged" } : r));
     const saved = (await admin.put("/admin/returns/reasons", { reasons: [...next.map(({ used: _u, ...r }) => r), { label: "Colour differs from photos", requiresComment: true }] }).expect(200)).body.data;
