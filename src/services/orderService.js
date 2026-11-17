@@ -37,7 +37,7 @@ export const TRANSITIONS = {
   cancelled: [],
   returned: [],
 };
-const CUSTOMER_CANCELLABLE = ["placed", "confirmed"];
+const CUSTOMER_CANCELLABLE = ["placed", "confirmed", "delivered"];
 const STOCK_HELD = ["pending_payment", "placed", "confirmed", "packed"]; // cancelling these returns stock
 
 const ownerKey = ({ userId, guestId }) => (userId ? `u:${userId}` : `g:${guestId}`);

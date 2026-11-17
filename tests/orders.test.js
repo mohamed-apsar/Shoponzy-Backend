@@ -267,6 +267,23 @@ describe("order access, tracking and cancellation", () => {
     await c.post(`/orders/${order.orderNumber}/cancel`, {}).expect(409);
   });
 
+  it("customers can cancel their delivered orders without restocking delivered goods", async () => {
+    const customer = await customerBrowser();
+    const { order, product } = await placeOrder(customer, 2);
+    const admin = await adminBrowser();
+    const stored = await Order.findOne({ orderNumber: order.orderNumber });
+    for (const status of ["confirmed", "shipped", "delivered"]) {
+      await admin.patch(`/admin/orders/${stored._id}/status`, { status }).expect(200);
+    }
+    await (await customerBrowser()).post(`/orders/${order.orderNumber}/cancel`, {}).expect(404);
+    const result = await customer.post(`/orders/${order.orderNumber}/cancel`, {}).expect(200);
+    expect(result.body.data).toMatchObject({ status: "cancelled", paymentStatus: "paid", refundRequired: true });
+    expect(await stockOf(product._id, product.variants[0]._id)).toBe(3);
+    expect(await InventoryMovement.countDocuments({ order: stored._id, reason: "order_cancelled" })).toBe(0);
+    await customer.post(`/orders/${order.orderNumber}/cancel`, {}).expect(409);
+    expect(await stockOf(product._id, product.variants[0]._id)).toBe(3);
+  });
+
   it("admins move orders through permitted statuses only; delivery marks COD paid; returns restock", async () => {
     const sent = mockMail();
     const admin = await adminBrowser();
