@@ -252,13 +252,18 @@ describe("order access, tracking and cancellation", () => {
     await request(app).get(`${API}/orders`).expect(401);
   });
 
-  it("guest tracking requires an OTP for the order's checkout mobile number", async () => {
+  it("guest tracking finds orders by verified checkout mobile number without an order ID", async () => {
     const { order } = await placeOrder(await browser());
+    const { order: second } = await placeOrder(await browser());
+    const otherGuest = await browser();
+    const product = await simpleProduct();
+    await otherGuest.post("/cart/items", { productId: String(product._id), variantId: String(product.variants[0]._id), qty: 1 }).expect(200);
+    await checkout(otherGuest, { contact: { ...CONTACT, phone: "9123456789" } }).expect(201);
     const anyone = await browser();
-    const details = { orderNumber: order.orderNumber.toLowerCase(), phone: "+91 98765 43210" };
+    const details = { phone: "+91 98765 43210" };
     sendTrackingSms.mockClear();
     await anyone.post("/orders/track/request-otp", { orderNumber: order.orderNumber }).expect(400);
-    const unknown = await anyone.post("/orders/track/request-otp", { ...details, phone: "9123456789" }).expect(200);
+    const unknown = await anyone.post("/orders/track/request-otp", { phone: "6000000000" }).expect(200);
     expect(sendTrackingSms).not.toHaveBeenCalled();
     const requested = await anyone.post("/orders/track/request-otp", details).expect(200);
     expect(requested.body.data).toEqual(unknown.body.data);
@@ -266,8 +271,10 @@ describe("order access, tracking and cancellation", () => {
     await anyone.post("/orders/track", details).expect(400);
     await anyone.post("/orders/track", { ...details, code: "000000" }).expect(400);
     const res = await anyone.post("/orders/track", { ...details, code: "123456" }).expect(200);
-    expect(res.body.data).toMatchObject({ orderNumber: order.orderNumber, status: "placed", itemCount: 1 });
-    expect(res.body.data.shippingAddress).toBeUndefined();
+    expect(res.body.data.orders.map((entry) => entry.orderNumber)).toEqual([second.orderNumber, order.orderNumber]);
+    expect(res.body.data.orders[0]).toMatchObject({ status: "placed", itemCount: 1 });
+    expect(res.body.data.orders[0]).not.toHaveProperty("shippingAddress");
+    expect(res.body.data.orders[0]).not.toHaveProperty("contact");
     await anyone.post("/orders/track", { ...details, code: "123456" }).expect(400);
     await anyone.post("/orders/track", { ...details, phone: "9123456789", code: "123456" }).expect(400);
   });

@@ -76,10 +76,16 @@ export async function abandonPayment(req, res) {
   ok(res, { order: orders.customerOrderView(updated) });
 }
 
+const trackingFilter = (phone, orderNumber) => ({
+  "contact.phone": phone,
+  status: { $ne: "pending_payment" },
+  ...(orderNumber ? { orderNumber } : {}),
+});
+
 export async function requestTrackingOtp(req, res) {
   requireTrackingSms();
   const { orderNumber, phone } = req.valid.body;
-  const match = await Order.exists({ orderNumber, "contact.phone": phone, status: { $ne: "pending_payment" } });
+  const match = await Order.exists(trackingFilter(phone, orderNumber));
   if (match) {
     // Keep the response identical for unknown orders and failed deliveries.
     try {
@@ -89,38 +95,50 @@ export async function requestTrackingOtp(req, res) {
     }
   }
   res.set("Cache-Control", "private, no-store");
-  ok(res, { message: "If the order and mobile number match, we’ll send an SMS code." });
+  ok(res, { message: "If we find matching orders for this mobile number, we’ll send an SMS code." });
 }
 
 export async function track(req, res) {
   requireTrackingSms();
   const { orderNumber, phone, code } = req.valid.body;
-  const order = await Order.findOne({ orderNumber, "contact.phone": phone, status: { $ne: "pending_payment" } }).lean();
-  if (!order || !(await verifyTrackingSms(phone, code))) {
+  const filter = trackingFilter(phone, orderNumber);
+  if (!(await Order.exists(filter)) || !(await verifyTrackingSms(phone, code))) {
     throw new AppError(400, "TRACKING_OTP_INVALID", "The verification code is invalid or expired. Check the code or request a new one.");
   }
   res.set("Cache-Control", "private, no-store");
-  ok(res, await trackingView(order));
+  if (orderNumber) {
+    const order = await Order.findOne(filter).lean();
+    if (!order) throw AppError.notFound("Order not found.");
+    return ok(res, await trackingView(order));
+  }
+  const matches = await Order.find(filter).sort({ createdAt: -1, _id: -1 }).limit(20).lean();
+  ok(res, { orders: await trackingViews(matches) });
 }
 
 async function trackingView(order) {
+  return (await trackingViews([order]))[0];
+}
+
+async function trackingViews(orders) {
+  const ids = orders.map((order) => order._id);
+  if (!ids.length) return [];
   const [requests, payments] = await Promise.all([
-    ReturnRequest.find({ order: order._id }).sort({ createdAt: -1 })
-      .select("returnNumber status updatedAt refund.status refund.amount").lean(),
-    Payment.find({ order: order._id, "refunds.0": { $exists: true } }).select("refunds").lean(),
+    ReturnRequest.find({ order: { $in: ids } }).sort({ createdAt: -1 })
+      .select("order returnNumber status updatedAt refund.status refund.amount").lean(),
+    Payment.find({ order: { $in: ids }, "refunds.0": { $exists: true } }).select("order refunds").lean(),
   ]);
-  return {
+  return orders.map((order) => ({
     orderNumber: order.orderNumber, status: order.status, paymentStatus: order.paymentStatus, paymentMethod: order.paymentMethod,
     total: order.total, placedAt: order.placedAt, itemCount: order.items.reduce((s, i) => s + i.qty, 0),
     fulfilment: order.fulfilment, history: (order.history || []).map(({ status, at }) => ({ status, at })),
     cancelReason: order.cancelReason, refundRequired: order.refundRequired, refundedAmount: order.refundedAmount,
-    returns: requests.map(({ returnNumber, status, updatedAt, refund }) => ({
+    returns: requests.filter((request) => String(request.order) === String(order._id)).map(({ returnNumber, status, updatedAt, refund }) => ({
       returnNumber, status, updatedAt, refundStatus: refund?.status, refundAmount: refund?.amount,
     })),
-    refunds: payments.flatMap((payment) => payment.refunds)
+    refunds: payments.filter((payment) => String(payment.order) === String(order._id)).flatMap((payment) => payment.refunds)
       .filter((refund) => !refund.returnRequest)
       .map(({ status, amount, processedAt, failedAt, at }) => ({ status, amount, at: processedAt || failedAt || at })),
-  };
+  }));
 }
 
 /* POST /payments/razorpay/verify — Checkout success callback. The signature proves Razorpay issued it;
