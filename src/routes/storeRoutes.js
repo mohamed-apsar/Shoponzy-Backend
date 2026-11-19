@@ -14,7 +14,7 @@ import { validate } from "../middleware/validate.js";
 import { formLimiter, checkoutLimiter, trackLimiter, loginIpLimiter, returnUploadLimiter } from "../middleware/rateLimits.js";
 import { idsQuery, publicProductsQuery } from "../validators/catalogValidators.js";
 import { contactSchema, newsletterSchema, notFoundTrackSchema } from "../validators/contentValidators.js";
-import { addCartItemSchema, addressSchema, cancelSchema, checkoutSchema, couponSchema, myOrdersQuery, trackOrderSchema, updateCartItemSchema, verifyPaymentSchema } from "../validators/commerceValidators.js";
+import { addCartItemSchema, addressSchema, cancelSchema, checkoutSchema, couponSchema, myOrdersQuery, trackingOtpSchema, trackOrderSchema, updateCartItemSchema, verifyPaymentSchema } from "../validators/commerceValidators.js";
 import { changePasswordSchema, createSupportTicketSchema, deleteAccountSchema, forgotPasswordSchema, profileSchema, resetPasswordSchema, wishlistAddSchema, wishlistMergeSchema } from "../validators/accountValidators.js";
 import { objectId } from "../validators/common.js";
 import { z } from "zod";
@@ -57,6 +57,7 @@ r.put("/cart/coupon",validate({ body: couponSchema }), optionalAuth("customer"),
 
 /* ---------- Orders & payments ---------- */
 r.post("/orders", checkoutLimiter, validate({ body: checkoutSchema }), optionalAuth("customer"), cartOwner({ create: true }), orders.checkout);
+r.post("/orders/track/request-otp", trackLimiter, validate({ body: trackingOtpSchema }), orders.requestTrackingOtp);
 r.post("/orders/track", trackLimiter, validate({ body: trackOrderSchema }), orders.track);
 r.get("/orders", authenticate("customer"), cartOwner(), validate({ query: myOrdersQuery }), orders.myOrders);
 r.get("/orders/:orderNumber", optionalAuth("customer"), cartOwner(), orders.myOrder);

@@ -5,6 +5,16 @@ import { ADDRESS, CONTACT, adminBrowser, customerBrowser, key, mockMail, simpleP
 import { Product } from "../src/models/Product.js";
 import { Coupon, InventoryMovement, Order, Payment } from "../src/models/commerce.js";
 import { SiteSetting } from "../src/models/site.js";
+import { sendTrackingSms } from "../src/services/trackingSmsService.js";
+
+vi.mock("../src/services/trackingSmsService.js", () => {
+  const active = new Set();
+  return {
+    requireTrackingSms: () => {},
+    sendTrackingSms: vi.fn(async (phone) => { active.add(phone); return true; }),
+    verifyTrackingSms: async (phone, code) => code === "123456" && active.delete(phone),
+  };
+});
 
 useDb();
 
@@ -242,13 +252,24 @@ describe("order access, tracking and cancellation", () => {
     await request(app).get(`${API}/orders`).expect(401);
   });
 
-  it("tracking needs the order ID and the checkout phone number", async () => {
+  it("guest tracking requires an OTP for the order's checkout mobile number", async () => {
     const { order } = await placeOrder(await browser());
     const anyone = await browser();
-    const res = await anyone.post("/orders/track", { orderNumber: order.orderNumber.toLowerCase(), phone: "+91 98765 43210" }).expect(200);
+    const details = { orderNumber: order.orderNumber.toLowerCase(), phone: "+91 98765 43210" };
+    sendTrackingSms.mockClear();
+    await anyone.post("/orders/track/request-otp", { orderNumber: order.orderNumber }).expect(400);
+    const unknown = await anyone.post("/orders/track/request-otp", { ...details, phone: "9123456789" }).expect(200);
+    expect(sendTrackingSms).not.toHaveBeenCalled();
+    const requested = await anyone.post("/orders/track/request-otp", details).expect(200);
+    expect(requested.body.data).toEqual(unknown.body.data);
+    expect(sendTrackingSms).toHaveBeenCalledWith("9876543210");
+    await anyone.post("/orders/track", details).expect(400);
+    await anyone.post("/orders/track", { ...details, code: "000000" }).expect(400);
+    const res = await anyone.post("/orders/track", { ...details, code: "123456" }).expect(200);
     expect(res.body.data).toMatchObject({ orderNumber: order.orderNumber, status: "placed", itemCount: 1 });
     expect(res.body.data.shippingAddress).toBeUndefined();
-    await anyone.post("/orders/track", { orderNumber: order.orderNumber, phone: "9123456789" }).expect(404);
+    await anyone.post("/orders/track", { ...details, code: "123456" }).expect(400);
+    await anyone.post("/orders/track", { ...details, phone: "9123456789", code: "123456" }).expect(400);
   });
 
   it("customers can cancel before dispatch: stock and coupon usage come back", async () => {
@@ -308,7 +329,10 @@ describe("order access, tracking and cancellation", () => {
     await admin.post(`/admin/orders/${id}/cancel`, {}).expect(409); // can't cancel once shipped
     await admin.patch(`/admin/orders/${id}/fulfilment`, { estimatedDeliveryDate: "2027-01-01" }).expect(200);
     await admin.patch(`/admin/orders/${id}/status`, { status: "out_for_delivery" }).expect(200);
-    const tracking = (await (await browser()).post("/orders/track", { orderNumber: order.orderNumber, phone: CONTACT.phone }).expect(200)).body.data;
+    const guest = await browser();
+    const trackingDetails = { orderNumber: order.orderNumber, phone: CONTACT.phone };
+    await guest.post("/orders/track/request-otp", trackingDetails).expect(200);
+    const tracking = (await guest.post("/orders/track", { ...trackingDetails, code: "123456" }).expect(200)).body.data;
     expect(tracking).toMatchObject({
       status: "out_for_delivery",
       fulfilment: { estimatedDeliveryDate: "2027-01-01", trackingUpdatedAt: expect.any(String), trackingNumber: "DLV123" },

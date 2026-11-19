@@ -5,6 +5,7 @@ import { getRazorpay, paymentFailure, paymentMethodDetails, verifyCheckoutSignat
 import { AppError } from "../utils/AppError.js";
 import { logger } from "../utils/logger.js";
 import { created, ok, paginate } from "../utils/respond.js";
+import { requireTrackingSms, sendTrackingSms, verifyTrackingSms } from "../services/trackingSmsService.js";
 
 /* POST /orders — checkout. Saved addresses are resolved server-side; prices come from the database. */
 export async function checkout(req, res) {
@@ -75,11 +76,29 @@ export async function abandonPayment(req, res) {
   ok(res, { order: orders.customerOrderView(updated) });
 }
 
-/* Guests (and anyone) can check status with order ID + the phone number used at checkout. Limited view. */
-export async function track(req, res) {
+export async function requestTrackingOtp(req, res) {
+  requireTrackingSms();
   const { orderNumber, phone } = req.valid.body;
+  const match = await Order.exists({ orderNumber, "contact.phone": phone, status: { $ne: "pending_payment" } });
+  if (match) {
+    // Keep the response identical for unknown orders and failed deliveries.
+    try {
+      if (!(await sendTrackingSms(phone))) logger.warn("Guest tracking SMS was declined by the provider");
+    } catch {
+      logger.warn("Guest tracking SMS provider unavailable");
+    }
+  }
+  res.set("Cache-Control", "private, no-store");
+  ok(res, { message: "If the order and mobile number match, we’ll send an SMS code." });
+}
+
+export async function track(req, res) {
+  requireTrackingSms();
+  const { orderNumber, phone, code } = req.valid.body;
   const order = await Order.findOne({ orderNumber, "contact.phone": phone, status: { $ne: "pending_payment" } }).lean();
-  if (!order) throw AppError.notFound("We couldn't find an order with that ID and phone number.");
+  if (!order || !(await verifyTrackingSms(phone, code))) {
+    throw new AppError(400, "TRACKING_OTP_INVALID", "The verification code is invalid or expired. Check the code or request a new one.");
+  }
   res.set("Cache-Control", "private, no-store");
   ok(res, await trackingView(order));
 }

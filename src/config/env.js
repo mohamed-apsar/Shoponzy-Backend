@@ -41,6 +41,9 @@ const schema = z.object({
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+  TWILIO_VERIFY_SERVICE_SID: z.string().optional(),
+  TWILIO_API_KEY_SID: z.string().optional(),
+  TWILIO_API_KEY_SECRET: z.string().optional(),
 
   // Any SMTP provider (Gmail, Brevo, SES, Zoho…). Without SMTP_HOST, emails are not sent and
   // password reset reports EMAIL_NOT_CONFIGURED.
