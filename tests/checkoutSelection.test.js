@@ -34,6 +34,7 @@ describe("checkout item selection", () => {
     expect(result.items).toHaveLength(1);
     expect(result.items[0]).toMatchObject({ name: direct.name, qty: 1, price: 500 });
     expect(result.subtotal).toBe(500);
+    expect(result.accountDiscount).toBe(kind === "account" ? 50 : 0);
     const cart = (await b.get("/cart").expect(200)).body.data;
     expect(cart.lines.map((line) => [line.name, line.qty])).toEqual([[a.name, 2], [direct.name, 3]]);
     await submit(b, [item(direct)], { checkoutMode: "buy-now", idempotencyKey: orderKey }).expect(200);

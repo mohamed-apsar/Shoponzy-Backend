@@ -111,7 +111,7 @@ export async function returnEligibility(order) {
    proportional share of the order's coupon and prepaid discounts. Delivery fees are not included. */
 export function maxRefundFor(items, order) {
   const lines = items.reduce((s, i) => s + i.price * i.qty, 0);
-  const discounts = (order.couponDiscount || 0) + (order.prepaidDiscount || 0);
+  const discounts = (order.couponDiscount || 0) + (order.accountDiscount || 0) + (order.prepaidDiscount || 0);
   const share = order.subtotal > 0 ? (discounts * lines) / order.subtotal : 0;
   const remaining = round2((order.total || 0) - (order.refundedAmount || 0));
   return Math.max(0, Math.min(round2(lines - share), remaining));
@@ -400,7 +400,7 @@ export async function getReturnDetail(id) {
     .populate("refund.payment", "providerPaymentId providerOrderId provider method status")
     .lean();
   if (!rr) throw AppError.notFound("Return request not found.");
-  const order = await Order.findById(rr.order).select("orderNumber status total subtotal couponDiscount prepaidDiscount shippingFee refundedAmount paymentMethod paymentStatus placedAt createdAt fulfilment").lean();
+  const order = await Order.findById(rr.order).select("orderNumber status total subtotal couponDiscount accountDiscount prepaidDiscount shippingFee refundedAmount paymentMethod paymentStatus placedAt createdAt fulfilment").lean();
   const payment = order && await Payment.findOne({ order: order._id, status: { $in: ["captured", "partially_refunded", "refunded"] } }).sort({ createdAt: -1 }).select("providerPaymentId providerOrderId provider method").lean();
   const person = (u) => (u ? { id: String(u._id), name: u.name, email: u.email } : null);
   return {

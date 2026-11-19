@@ -92,6 +92,7 @@ const orderSchema = new mongoose.Schema({
   mrpTotal: Number,
   couponCode: String,
   couponDiscount: { type: Number, default: 0 },
+  accountDiscount: { type: Number, default: 0 },
   prepaidDiscount: { type: Number, default: 0 },
   shippingFee: { type: Number, default: 0 },
   tax: { type: Number, default: 0 }, // tax collected on discounted product prices at checkout

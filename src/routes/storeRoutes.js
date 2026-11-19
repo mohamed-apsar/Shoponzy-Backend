@@ -56,7 +56,7 @@ r.get("/coupons/:code", trackLimiter, validate({ params: z.object({ code: z.stri
 r.put("/cart/coupon",validate({ body: couponSchema }), optionalAuth("customer"), cartOwner({ create: true }), cart.setCoupon);
 
 /* ---------- Orders & payments ---------- */
-r.post("/orders", checkoutLimiter, optionalAuth("customer"), cartOwner(), validate({ body: checkoutSchema }), orders.checkout);
+r.post("/orders", checkoutLimiter, validate({ body: checkoutSchema }), optionalAuth("customer"), cartOwner({ create: true }), orders.checkout);
 r.post("/orders/track", trackLimiter, validate({ body: trackOrderSchema }), orders.track);
 r.get("/orders", authenticate("customer"), cartOwner(), validate({ query: myOrdersQuery }), orders.myOrders);
 r.get("/orders/:orderNumber", optionalAuth("customer"), cartOwner(), orders.myOrder);

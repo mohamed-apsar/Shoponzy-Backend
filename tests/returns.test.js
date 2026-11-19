@@ -11,7 +11,7 @@ useDb();
 let admin, rzp;
 beforeEach(async () => { admin = await adminBrowser(); rzp = mockRazorpay(); });
 
-const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+const png = Buffer.from("88554e470d0a1a0a0000000d49484452", "hex");
 const stockOf = async (productId, variantId) => (await Product.findById(productId)).variants.id(variantId).stock;
 
 async function deliver(orderId) {
@@ -178,7 +178,7 @@ describe("admin return workflow", () => {
     await admin.post(`${url}/inspect`, { items: [{ index: 0, condition: "good", restockQty: 2 }, { index: 1, condition: "good", restockQty: 1 }] }).expect(409);
 
     const approved = (await admin.post(`${url}/approve`, { note: "Looks genuine" }).expect(200)).body.data;
-    expect(approved).toMatchObject({ status: "approved", adminNote: "Looks genuine", decidedBy: { name: "Store Admin" }, refund: { status: "pending", amount: 2000, maxAmount: 2000 } });
+    expect(approved).toMatchObject({ status: "approved", adminNote: "Looks genuine", decidedBy: { name: "Store Admin" }, refund: { status: "pending", amount: 1800, maxAmount: 1800 } });
     await admin.post(`${url}/approve`, {}).expect(409); // already decided
     await admin.post(`${url}/status`, { status: "pickup_scheduled", pickup: { courier: "Delhivery", trackingNumber: "DLV1" } }).expect(200);
     await admin.post(`${url}/status`, { status: "in_transit" }).expect(200);
@@ -234,7 +234,7 @@ describe("admin return workflow", () => {
 
   it("Razorpay refunds stay processing until Razorpay confirms them (webhook or sync), and failures can be retried", async () => {
     const { b, order, walletVariant } = await deliveredOrder({ method: "razorpay" });
-    expect(order.total).toBe(1900); // 5% prepaid discount
+    expect(order.total).toBe(1710); // 10% account discount, then 5% prepaid discount
     const rr = (await requestReturn(b, order, { items: [{ variantId: String(walletVariant._id), qty: 2 }], reason: "wrong_item" }).expect(201)).body.data;
     const url = `/admin/returns/${rr.id}`;
     await admin.post(`${url}/approve`, {}).expect(200);
@@ -242,7 +242,7 @@ describe("admin return workflow", () => {
     await admin.post(`${url}/inspect`, { items: [{ index: 0, condition: "opened", restockQty: 2 }] }).expect(200);
 
     const detail = (await admin.get(url).expect(200)).body.data;
-    expect(detail.refund).toMatchObject({ status: "pending", maxAmount: 950 }); // ₹1000 of ₹2000 lines, less half the ₹100 prepaid discount
+    expect(detail.refund).toMatchObject({ status: "pending", maxAmount: 855 }); // Half of the discounted ₹1710 order
     expect(detail.refund.originalPaymentId).toMatch(/^pay_/);
     expect(detail.refund.originalTransactionId).toBeTruthy();
 
@@ -255,13 +255,13 @@ describe("admin return workflow", () => {
 
     rzp.client.refundStatus = "pending";
     const first = (await admin.post(`${url}/refund`, {}).expect(200)).body.data;
-    expect(first.refund).toMatchObject({ status: "processing", amount: 950 });
+    expect(first.refund).toMatchObject({ status: "processing", amount: 855 });
     await admin.post(`${url}/refund`, {}).expect(409);
     await admin.post(`${url}/status`, { status: "completed" }).expect(409); // still processing
 
     // Razorpay reports the refund failed: the amount goes back to refundable and the return can be retried.
     const refundId = first.refund.refundId;
-    await webhook({ event: "refund.failed", payload: { refund: { entity: { id: refundId, payment_id: detail.refund.originalPaymentId, status: "failed", amount: 95000 } } } }).expect(200);
+    await webhook({ event: "refund.failed", payload: { refund: { entity: { id: refundId, payment_id: detail.refund.originalPaymentId, status: "failed", amount: 85500 } } } }).expect(200);
     expect((await admin.get(url).expect(200)).body.data.refund).toMatchObject({ status: "failed" });
     expect(await Order.findById(order._id).lean()).toMatchObject({ refundedAmount: 0, paymentStatus: "paid", refundRequired: true });
     expect((await Payment.findOne({ order: order._id }).lean()).refunds[0]).toMatchObject({ status: "failed", refundId });
@@ -273,10 +273,10 @@ describe("admin return workflow", () => {
     rzp.refunds.find((r) => r.id === retry.refund.refundId).status = "processed";
     const txId = detail.refund.originalTransactionId;
     expect((await admin.post(`/admin/transactions/${txId}/refunds/${retry.refund.refundId}/sync`, {}).expect(200)).body.data).toMatchObject({ status: "processed", changed: true });
-    expect((await admin.get(url).expect(200)).body.data.refund).toMatchObject({ status: "completed", amount: 950 });
+    expect((await admin.get(url).expect(200)).body.data.refund).toMatchObject({ status: "completed", amount: 855 });
     await admin.post(`${url}/status`, { status: "completed" }).expect(200);
     // Only part of the order was returned: it stays delivered.
-    expect((await Order.findById(order._id).lean())).toMatchObject({ status: "delivered", refundedAmount: 950, paymentStatus: "partially_refunded" });
+    expect((await Order.findById(order._id).lean())).toMatchObject({ status: "delivered", refundedAmount: 855, paymentStatus: "partially_refunded" });
   });
 
   it("is admin-only", async () => {

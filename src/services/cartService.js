@@ -120,7 +120,7 @@ export async function priceCart(cart, { userId, phone } = {}) {
   const subtotal = round2(buyable.reduce((s, l) => s + l.lineTotal, 0));
   const mrpTotal = round2(buyable.reduce((s, l) => s + l.mrp * l.qty, 0));
   const c = await evaluateCoupon(cart.couponCode, subtotal, { userId, phone });
-  const base = { subtotal, mrpTotal, couponDiscount: c.discount, commerce, taxRate: general.taxRate || 0 };
+  const base = { subtotal, mrpTotal, couponDiscount: c.discount, signedIn: Boolean(userId), commerce, taxRate: general.taxRate || 0 };
   return {
     lines,
     itemCount: lines.reduce((s, l) => s + l.qty, 0),

@@ -51,7 +51,7 @@ describe("CSV exports", () => {
     expect(rows).toHaveLength(3); // admins are not customers
     const row = rows.find((r) => r.includes("calc"));
     expect(row.startsWith("'=cmd")).toBe(true); // formula neutralised
-    expect(row).toMatch(/,active,.*,1,1,1000,/);
+    expect(row).toMatch(/,active,.*,1,1,900,/);
     expect(await csv("/admin/users/export.csv?status=disabled")).toHaveLength(2);
     expect(await csv("/admin/users/export.csv?q=dan")).toHaveLength(2);
   });
@@ -100,7 +100,7 @@ describe("CSV exports", () => {
 
     const methods = await csv("/admin/transactions/methods.csv");
     expect(methods[0]).toBe("payment_method,transactions,successful,failed,success_rate_pct,amount_received,amount_refunded");
-    expect(methods[1]).toBe("card,1,1,0,100,950,200");
+    expect(methods[1]).toBe("card,1,1,0,100,855,200");
   });
 
   it("exports are admin-only and audit-logged", async () => {
