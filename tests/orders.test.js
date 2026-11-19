@@ -279,6 +279,25 @@ describe("order access, tracking and cancellation", () => {
     await anyone.post("/orders/track", { ...details, phone: "9123456789", code: "123456" }).expect(400);
   });
 
+  it("verifies guest tracking by email when the checkout mobile and email match", async () => {
+    const messages = mockMail();
+    const { order } = await placeOrder(await browser());
+    const guest = await browser();
+    const details = { phone: CONTACT.phone, email: CONTACT.email };
+    await guest.post("/orders/track/request-otp", { email: CONTACT.email }).expect(400);
+    await guest.post("/orders/track/request-otp", { ...details, email: "different@example.com" }).expect(200);
+    expect(messages.filter((message) => message.subject.includes("tracking code"))).toHaveLength(0);
+    await guest.post("/orders/track/request-otp", details).expect(200);
+    const message = messages.find((entry) => entry.subject === "Your Shoponzy order tracking code");
+    expect(message.to).toBe(CONTACT.email);
+    const code = message.text.match(/\b\d{6}\b/)[0];
+    const wrongCode = code === "000000" ? "111111" : "000000";
+    await guest.post("/orders/track", { ...details, code: wrongCode }).expect(400);
+    const tracked = await guest.post("/orders/track", { ...details, code }).expect(200);
+    expect(tracked.body.data.orders.map((entry) => entry.orderNumber)).toEqual([order.orderNumber]);
+    await guest.post("/orders/track", { ...details, code }).expect(400);
+  });
+
   it("customers can cancel before dispatch: stock and coupon usage come back", async () => {
     await Coupon.create({ code: "TEN", type: "fixed", value: 10 });
     const c = await customerBrowser();

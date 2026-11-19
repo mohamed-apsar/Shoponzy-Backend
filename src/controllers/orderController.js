@@ -6,6 +6,7 @@ import { AppError } from "../utils/AppError.js";
 import { logger } from "../utils/logger.js";
 import { created, ok, paginate } from "../utils/respond.js";
 import { requireTrackingSms, sendTrackingSms, verifyTrackingSms } from "../services/trackingSmsService.js";
+import { requireTrackingEmail, sendTrackingEmail, verifyTrackingEmail } from "../services/trackingEmailService.js";
 
 /* POST /orders — checkout. Saved addresses are resolved server-side; prices come from the database. */
 export async function checkout(req, res) {
@@ -76,33 +77,38 @@ export async function abandonPayment(req, res) {
   ok(res, { order: orders.customerOrderView(updated) });
 }
 
-const trackingFilter = (phone, orderNumber) => ({
+const trackingFilter = (phone, orderNumber, email) => ({
   "contact.phone": phone,
   status: { $ne: "pending_payment" },
   ...(orderNumber ? { orderNumber } : {}),
+  ...(email ? { "contact.email": email } : {}),
 });
 
 export async function requestTrackingOtp(req, res) {
-  requireTrackingSms();
-  const { orderNumber, phone } = req.valid.body;
-  const match = await Order.exists(trackingFilter(phone, orderNumber));
+  const { orderNumber, phone, email } = req.valid.body;
+  if (email) requireTrackingEmail();
+  else requireTrackingSms();
+  const match = await Order.exists(trackingFilter(phone, orderNumber, email));
   if (match) {
     // Keep the response identical for unknown orders and failed deliveries.
     try {
-      if (!(await sendTrackingSms(phone))) logger.warn("Guest tracking SMS was declined by the provider");
+      if (email) await sendTrackingEmail(phone, email);
+      else if (!(await sendTrackingSms(phone))) logger.warn("Guest tracking SMS was declined by the provider");
     } catch {
-      logger.warn("Guest tracking SMS provider unavailable");
+      logger.warn("Guest tracking code could not be sent");
     }
   }
   res.set("Cache-Control", "private, no-store");
-  ok(res, { message: "If we find matching orders for this mobile number, we’ll send an SMS code." });
+  ok(res, { message: email ? "If the checkout details match, we’ll email you a code." : "If we find matching orders for this mobile number, we’ll send an SMS code." });
 }
 
 export async function track(req, res) {
-  requireTrackingSms();
-  const { orderNumber, phone, code } = req.valid.body;
-  const filter = trackingFilter(phone, orderNumber);
-  if (!(await Order.exists(filter)) || !(await verifyTrackingSms(phone, code))) {
+  const { orderNumber, phone, code, email } = req.valid.body;
+  if (email) requireTrackingEmail();
+  else requireTrackingSms();
+  const filter = trackingFilter(phone, orderNumber, email);
+  const verify = () => email ? verifyTrackingEmail(phone, email, code) : verifyTrackingSms(phone, code);
+  if (!(await Order.exists(filter)) || !(await verify())) {
     throw new AppError(400, "TRACKING_OTP_INVALID", "The verification code is invalid or expired. Check the code or request a new one.");
   }
   res.set("Cache-Control", "private, no-store");
