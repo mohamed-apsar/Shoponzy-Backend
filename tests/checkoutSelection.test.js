@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { browser, useDb } from "./helpers.js";
-import { ADDRESS, CONTACT, customerBrowser, key, mockRazorpay, simpleProduct } from "./fixtures.js";
+import { ADDRESS, CONTACT, adminBrowser, customerBrowser, key, mockRazorpay, simpleProduct } from "./fixtures.js";
 import { Product } from "../src/models/Product.js";
 import { SiteSetting } from "../src/models/site.js";
 
@@ -51,6 +51,25 @@ describe("checkout item selection", () => {
     expect(order.items).toHaveLength(1);
     expect(order.subtotal).toBe(1000);
     expect((await b.get("/cart").expect(200)).body.data.lines.map((line) => [line.name, line.qty])).toEqual([[a.name, 1], [other.name, 1]]);
+  });
+
+  it("applies an admin-configured fixed account discount and places zero-total orders without payment", async () => {
+    const admin = await adminBrowser();
+    const customer = await customerBrowser();
+    const guest = await browser();
+    const product = await simpleProduct({ price: 1000, stock: 3 });
+    await admin.patch("/admin/site-settings/commerce", { accountDiscount: { type: "percent", value: 91 } }).expect(400);
+    const accountDiscount = { type: "fixed", value: 1200 };
+    await admin.patch("/admin/site-settings/commerce", { accountDiscount }).expect(200);
+    expect((await guest.get("/site-settings").expect(200)).body.data.commerce.accountDiscount).toEqual(accountDiscount);
+    const guestOrder = (await submit(guest, [item(product)]).expect(201)).body.data.order;
+    expect(guestOrder.accountDiscount).toBe(0);
+    const online = (await submit(customer, [item(product)], { paymentMethod: "razorpay" }).expect(201)).body.data;
+    expect(online.order).toMatchObject({ accountDiscount: 1000, total: 0, status: "placed", paymentStatus: "paid" });
+    expect(online.payment).toBeNull();
+    await admin.patch("/admin/site-settings/commerce", { accountDiscount: { type: "fixed", value: 0 } }).expect(200);
+    const disabled = (await submit(customer, [item(product)]).expect(201)).body.data.order;
+    expect(disabled.accountDiscount).toBe(0);
   });
 
   it("supports Buy Now with an empty bag and rejects empty or duplicate selections", async () => {

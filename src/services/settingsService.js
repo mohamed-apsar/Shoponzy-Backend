@@ -46,7 +46,7 @@ export const DEFAULT_SETTINGS = {
     illustration: null, reopenAt: null, showContact: true,
   },
   commerce: {
-    freeShippingAbove: 999, shippingFee: 59, prepaidOffPct: 5, codEnabled: true, codMaxOrderValue: null,
+    freeShippingAbove: 999, shippingFee: 59, prepaidOffPct: 5, accountDiscount: { type: "percent", value: 10 }, codEnabled: true, codMaxOrderValue: null,
     deliveryText: "Usually delivered in 3–7 working days", returnDays: 7,
   },
   inventory: { lowStockThreshold: env.LOW_STOCK_THRESHOLD },

@@ -71,6 +71,10 @@ export const SETTINGS_SCHEMAS = {
   }).strict(),
   commerce: z.object({
     freeShippingAbove: z.number().min(0).max(1_000_000), shippingFee: z.number().min(0).max(10_000),
+    accountDiscount: z.discriminatedUnion("type", [
+      z.object({ type: z.literal("percent"), value: z.number().min(0).max(90) }).strict(),
+      z.object({ type: z.literal("fixed"), value: z.number().min(0).max(1_000_000) }).strict(),
+    ]),
     prepaidOffPct: z.number().min(0).max(50), codEnabled: z.boolean(),
     codMaxOrderValue: z.number().min(0).max(1_000_000).nullable(),
     deliveryText: text(120), returnDays: z.number().int().min(0).max(60),

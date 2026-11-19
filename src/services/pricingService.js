@@ -6,7 +6,9 @@ import { round2 } from "../models/shared.js";
    shipping is free once (subtotal − coupon) reaches the threshold. */
 export function computeTotals({ subtotal, mrpTotal, couponDiscount = 0, paymentMethod, commerce, taxRate = 0, signedIn = false }) {
   const afterCoupon = round2(Math.max(0, subtotal - couponDiscount));
-  const accountDiscount = signedIn ? round2(afterCoupon * 0.10) : 0;
+  const rule = commerce.accountDiscount;
+  const accountAmount = rule.type === "fixed" ? rule.value : afterCoupon * rule.value / 100;
+  const accountDiscount = signedIn ? round2(Math.min(afterCoupon, accountAmount)) : 0;
   const afterAccount = round2(afterCoupon - accountDiscount);
   const prepaidDiscount = paymentMethod === "razorpay" ? Math.round((afterAccount * commerce.prepaidOffPct) / 100) : 0;
   const shippingFee = subtotal === 0 || afterCoupon >= commerce.freeShippingAbove ? 0 : commerce.shippingFee;

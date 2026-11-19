@@ -138,6 +138,8 @@ export async function createOrder({ owner, input, ip }) {
     color: l.color, size: l.size, price: l.price, mrp: l.mrp, qty: l.qty, lineTotal: l.lineTotal,
   }));
   const isCod = input.paymentMethod === "cod";
+  const noPaymentDue = totals.total === 0;
+  const placeImmediately = isCod || noPaymentDue;
   const couponApplied = priced.coupon?.applied ? priced.coupon.code : null;
 
   let order;
@@ -160,13 +162,13 @@ export async function createOrder({ owner, input, ip }) {
         contact: input.contact, items, shippingAddress: input.shippingAddress,
         subtotal: totals.subtotal, mrpTotal: totals.mrpTotal, couponCode: couponApplied || undefined, couponDiscount: totals.couponDiscount,
         accountDiscount: totals.accountDiscount, prepaidDiscount: totals.prepaidDiscount, shippingFee: totals.shippingFee, tax: totals.tax, total: totals.total,
-        paymentMethod: input.paymentMethod, paymentStatus: "pending",
-        status: isCod ? "placed" : "pending_payment", stockReserved: true,
-        reservationExpiresAt: isCod ? undefined : new Date(now.getTime() + env.ORDER_RESERVATION_MINUTES * 60_000),
-        placedAt: isCod ? now : undefined, notes: input.notes, idempotencyKey: key || undefined,
-        history: [{ status: isCod ? "placed" : "pending_payment", note: isCod ? "Order placed (Cash on delivery)" : "Awaiting online payment", at: now }],
+        paymentMethod: input.paymentMethod, paymentStatus: noPaymentDue ? "paid" : "pending",
+        status: placeImmediately ? "placed" : "pending_payment", stockReserved: true,
+        reservationExpiresAt: placeImmediately ? undefined : new Date(now.getTime() + env.ORDER_RESERVATION_MINUTES * 60_000),
+        placedAt: placeImmediately ? now : undefined, notes: input.notes, idempotencyKey: key || undefined,
+        history: [{ status: placeImmediately ? "placed" : "pending_payment", note: noPaymentDue ? "Order placed (no payment due)" : isCod ? "Order placed (Cash on delivery)" : "Awaiting online payment", at: now }],
       }], { session });
-      if (isCod) await Payment.create([{ order: orderId, provider: "cod", amount: totals.total, status: "pending" }], { session });
+      if (isCod && !noPaymentDue) await Payment.create([{ order: orderId, provider: "cod", amount: totals.total, status: "pending" }], { session });
       consumed = [];
       if (!explicitItems) {
         await Cart.updateOne({ _id: cart._id }, { $set: { items: [], couponCode: null } }, { session });
@@ -196,7 +198,7 @@ export async function createOrder({ owner, input, ip }) {
     throw err;
   }
 
-  if (!isCod) {
+  if (!placeImmediately) {
     try {
       const rzp = await getRazorpay().createOrder({ amount: toPaise(order.total), currency: "INR", receipt: order.orderNumber, notes: { orderNumber: order.orderNumber } });
       await Payment.create({ order: order._id, provider: "razorpay", providerOrderId: rzp.id, amount: order.total, status: "created" });
