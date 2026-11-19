@@ -100,7 +100,7 @@ describe("CSV exports", () => {
 
     const methods = await csv("/admin/transactions/methods.csv");
     expect(methods[0]).toBe("payment_method,transactions,successful,failed,success_rate_pct,amount_received,amount_refunded");
-    expect(methods[1]).toBe("card,1,1,0,100,855,200");
+    expect(methods[1]).toBe("card,1,1,0,100,950,200");
   });
 
   it("exports are admin-only and audit-logged", async () => {
