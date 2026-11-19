@@ -1,4 +1,4 @@
-import { Order, Payment, WebhookEvent } from "../models/commerce.js";
+import { Order, Payment, ReturnRequest, WebhookEvent } from "../models/commerce.js";
 import { User } from "../models/User.js";
 import * as orders from "../services/orderService.js";
 import { getRazorpay, paymentFailure, paymentMethodDetails, verifyCheckoutSignature, verifyWebhookSignature } from "../services/razorpayService.js";
@@ -58,7 +58,9 @@ export async function myOrders(req, res) {
 
 export async function myOrder(req, res) {
   const order = await findOwnOrder(req);
-  ok(res, { order: orders.customerOrderView(order), payment: await orders.paymentPayload(order) });
+  const [payment, tracking] = await Promise.all([orders.paymentPayload(order), trackingView(order)]);
+  res.set("Cache-Control", "private, no-store");
+  ok(res, { order: orders.customerOrderView(order), payment, tracking });
 }
 
 export async function cancelMyOrder(req, res) {
@@ -78,11 +80,28 @@ export async function track(req, res) {
   const { orderNumber, phone } = req.valid.body;
   const order = await Order.findOne({ orderNumber, "contact.phone": phone, status: { $ne: "pending_payment" } }).lean();
   if (!order) throw AppError.notFound("We couldn't find an order with that ID and phone number.");
-  ok(res, {
+  res.set("Cache-Control", "private, no-store");
+  ok(res, await trackingView(order));
+}
+
+async function trackingView(order) {
+  const [requests, payments] = await Promise.all([
+    ReturnRequest.find({ order: order._id }).sort({ createdAt: -1 })
+      .select("returnNumber status updatedAt refund.status refund.amount").lean(),
+    Payment.find({ order: order._id, "refunds.0": { $exists: true } }).select("refunds").lean(),
+  ]);
+  return {
     orderNumber: order.orderNumber, status: order.status, paymentStatus: order.paymentStatus, paymentMethod: order.paymentMethod,
-    total: order.total, placedAt: order.placedAt || order.createdAt, itemCount: order.items.reduce((s, i) => s + i.qty, 0),
-    fulfilment: order.fulfilment, history: order.history.map(({ status, at }) => ({ status, at })),
-  });
+    total: order.total, placedAt: order.placedAt, itemCount: order.items.reduce((s, i) => s + i.qty, 0),
+    fulfilment: order.fulfilment, history: (order.history || []).map(({ status, at }) => ({ status, at })),
+    cancelReason: order.cancelReason, refundRequired: order.refundRequired, refundedAmount: order.refundedAmount,
+    returns: requests.map(({ returnNumber, status, updatedAt, refund }) => ({
+      returnNumber, status, updatedAt, refundStatus: refund?.status, refundAmount: refund?.amount,
+    })),
+    refunds: payments.flatMap((payment) => payment.refunds)
+      .filter((refund) => !refund.returnRequest)
+      .map(({ status, amount, processedAt, failedAt, at }) => ({ status, amount, at: processedAt || failedAt || at })),
+  };
 }
 
 /* POST /payments/razorpay/verify — Checkout success callback. The signature proves Razorpay issued it;

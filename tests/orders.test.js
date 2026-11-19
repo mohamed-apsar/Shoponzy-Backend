@@ -265,6 +265,7 @@ describe("order access, tracking and cancellation", () => {
     expect((await Coupon.findOne({ code: "TEN" })).usedCount).toBe(0);
     const admin = await adminBrowser();
     const alerts = (await admin.get("/admin/order-alerts").expect(200)).body.data;
+    await admin.patch(`/admin/orders/${res.body.data.id}/status`, { status: "delivered", force: true }).expect(409);
     expect(alerts.cancelledCount).toBe(1);
     expect(alerts.cancellations[0].orderNumber).toBe(order.orderNumber);
     await c.get("/admin/order-alerts").expect(401);
@@ -301,10 +302,19 @@ describe("order access, tracking and cancellation", () => {
     await admin.patch(`/admin/orders/${id}/status`, { status: "confirmed" }).expect(200);
     const shipped = await admin.patch(`/admin/orders/${id}/status`, { status: "shipped", fulfilment: { courier: "Delhivery", trackingNumber: "DLV123", trackingUrl: "https://track.example/DLV123" } }).expect(200);
     expect(shipped.body.data.order.fulfilment).toMatchObject({ courier: "Delhivery", trackingNumber: "DLV123" });
-    expect(shipped.body.data.allowedTransitions).toEqual(["delivered", "returned"]);
+    expect(shipped.body.data.allowedTransitions).toEqual(["out_for_delivery", "delivered", "returned"]);
     // Order emails are sent in the background (after the email-switch setting is read), so wait for it.
     await vi.waitFor(() => expect(sent.some((m) => m.subject === `Order ${order.orderNumber}: shipped` && m.text.includes("https://track.example/DLV123"))).toBe(true));
     await admin.post(`/admin/orders/${id}/cancel`, {}).expect(409); // can't cancel once shipped
+    await admin.patch(`/admin/orders/${id}/fulfilment`, { estimatedDeliveryDate: "2027-01-01" }).expect(200);
+    await admin.patch(`/admin/orders/${id}/status`, { status: "out_for_delivery" }).expect(200);
+    const tracking = (await (await browser()).post("/orders/track", { orderNumber: order.orderNumber, phone: CONTACT.phone }).expect(200)).body.data;
+    expect(tracking).toMatchObject({
+      status: "out_for_delivery",
+      fulfilment: { estimatedDeliveryDate: "2027-01-01", trackingUpdatedAt: expect.any(String), trackingNumber: "DLV123" },
+      history: expect.arrayContaining([{ status: "out_for_delivery", at: expect.any(String) }]),
+    });
+    expect(tracking).not.toHaveProperty("contact");
     const delivered = (await admin.patch(`/admin/orders/${id}/status`, { status: "delivered" }).expect(200)).body.data.order;
     expect(delivered.paymentStatus).toBe("paid");
     expect(await Payment.findOne({ order: id })).toMatchObject({ status: "captured" });
@@ -313,7 +323,7 @@ describe("order access, tracking and cancellation", () => {
     const returned = (await admin.patch(`/admin/orders/${id}/status`, { status: "returned", note: "Customer returned", restock: true }).expect(200)).body.data.order;
     expect(returned).toMatchObject({ status: "returned", refundRequired: true });
     expect(await stockOf(product._id, product.variants[0]._id)).toBe(before + 2);
-    expect(returned.history.map((h) => h.status)).toEqual(["placed", "confirmed", "shipped", "delivered", "returned"]);
+    expect(returned.history.map((h) => h.status)).toEqual(["placed", "confirmed", "shipped", "out_for_delivery", "delivered", "returned"]);
 
     // COD refunds are paid outside the gateway and need a reference.
     await admin.post(`/admin/orders/${id}/refund`, {}).expect(400);

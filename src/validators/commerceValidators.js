@@ -66,6 +66,7 @@ export const updateOrderStatusSchema = z.object({
   restock: z.boolean().optional(),
 }).strict();
 export const updateFulfilmentSchema = z.object({
+  estimatedDeliveryDate: z.string().date().nullable().optional(),
   courier: z.string().trim().max(60).optional(), trackingNumber: z.string().trim().max(60).optional(),
   trackingUrl: z.union([z.string().trim().url().max(500).regex(/^https?:\/\//), z.literal("")]).optional(),
   notes: z.string().trim().max(500).optional(),

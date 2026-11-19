@@ -67,7 +67,7 @@ toJSONPlugin(couponSchema);
 export const Coupon = mongoose.model("Coupon", couponSchema);
 
 /* ---------- Orders ---------- */
-export const ORDER_STATUSES = ["pending_payment", "placed", "confirmed", "packed", "shipped", "delivered", "cancelled", "returned"];
+export const ORDER_STATUSES = ["pending_payment", "placed", "confirmed", "packed", "shipped", "out_for_delivery", "delivered", "cancelled", "returned"];
 export const PAYMENT_STATUSES = ["pending", "paid", "failed", "refunded", "partially_refunded"];
 
 const addressSnapshot = {
@@ -109,7 +109,7 @@ const orderSchema = new mongoose.Schema({
   // Set while a refund call to the gateway is in flight, so a double click can't refund twice.
   refundLockedAt: { type: Date, default: null },
   fulfilment: {
-    courier: String, trackingNumber: String, trackingUrl: String, shippedAt: Date, deliveredAt: Date,
+    courier: String, trackingNumber: String, trackingUrl: String, estimatedDeliveryDate: String, trackingUpdatedAt: Date, shippedAt: Date, deliveredAt: Date,
   },
   notes: { type: String, maxlength: 500 },
   cancelReason: String,

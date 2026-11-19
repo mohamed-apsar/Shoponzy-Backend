@@ -29,7 +29,7 @@ export async function listOrders(req, res) {
     Order.countDocuments(filter),
     Order.aggregate([{ $match: visibility }, { $group: { _id: "$status", n: { $sum: 1 } } }]),
   ]);
-  ok(res, items, { ...meta(total), statusCounts: Object.fromEntries(counts.map((c) => [c._id, c.n])) });
+  ok(res, items.map((order) => ({ ...order.toJSON(), allowedTransitions: orders.TRANSITIONS[order.status] })), { ...meta(total), statusCounts: Object.fromEntries(counts.map((c) => [c._id, c.n])) });
 }
 
 async function loadOrder(id) {
@@ -55,7 +55,8 @@ export async function updateStatus(req, res) {
 export async function updateFulfilment(req, res) {
   const order = await loadOrder(req.params.id);
   const { notes, ...fulfilment } = req.valid.body;
-  order.fulfilment = { ...order.fulfilment?.toObject?.(), ...fulfilment };
+  for (const [key, value] of Object.entries(fulfilment)) order.set(`fulfilment.${key}`, value);
+  order.set("fulfilment.trackingUpdatedAt", new Date());
   if (notes !== undefined) order.notes = notes;
   await order.save();
   await audit("order.fulfilment_updated", { actor: req.auth.user._id, entity: "Order", entityId: order._id, ip: req.ip });
