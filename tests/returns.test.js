@@ -11,7 +11,7 @@ useDb();
 let admin, rzp;
 beforeEach(async () => { admin = await adminBrowser(); rzp = mockRazorpay(); });
 
-const png = Buffer.from("88554e470d0a1a0a0000000d49484452", "hex");
+const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
 const stockOf = async (productId, variantId) => (await Product.findById(productId)).variants.id(variantId).stock;
 
 async function deliver(orderId) {
