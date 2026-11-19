@@ -239,6 +239,15 @@ describe("order access, tracking and cancellation", () => {
   it("guests see their own order from the same browser; nobody else can", async () => {
     const guest = await browser();
     const { order } = await placeOrder(guest);
+    const otherGuest = await browser();
+    const { order: otherOrder } = await placeOrder(otherGuest);
+    const list = (await guest.get("/orders/guest").expect(200)).body;
+    expect(list.meta.total).toBe(1);
+    expect(list.data.map((entry) => entry.orderNumber)).toEqual([order.orderNumber]);
+    expect(list.data[0]).not.toHaveProperty("guestId");
+    expect(list.data[0]).not.toHaveProperty("contact");
+    expect((await otherGuest.get("/orders/guest").expect(200)).body.data.map((entry) => entry.orderNumber)).toEqual([otherOrder.orderNumber]);
+    expect((await (await browser()).get("/orders/guest").expect(200)).body.data).toEqual([]);
     await guest.get(`/orders/${order.orderNumber}`).expect(200);
     await (await browser()).get(`/orders/${order.orderNumber}`).expect(404);
     await (await customerBrowser()).get(`/orders/${order.orderNumber}`).expect(404);
@@ -279,12 +288,12 @@ describe("order access, tracking and cancellation", () => {
     await anyone.post("/orders/track", { ...details, phone: "9123456789", code: "123456" }).expect(400);
   });
 
-  it("verifies guest tracking by email when the checkout mobile and email match", async () => {
+  it("verifies guest tracking by checkout email alone and rejects replay", async () => {
     const messages = mockMail();
     const { order } = await placeOrder(await browser());
     const guest = await browser();
-    const details = { phone: CONTACT.phone, email: CONTACT.email };
-    await guest.post("/orders/track/request-otp", { email: CONTACT.email }).expect(400);
+    const details = { email: CONTACT.email };
+    await guest.post("/orders/track/request-otp", {}).expect(400);
     await guest.post("/orders/track/request-otp", { ...details, email: "different@example.com" }).expect(200);
     expect(messages.filter((message) => message.subject.includes("tracking code"))).toHaveLength(0);
     await guest.post("/orders/track/request-otp", details).expect(200);

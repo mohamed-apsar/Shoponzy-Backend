@@ -60,6 +60,7 @@ r.post("/orders", checkoutLimiter, validate({ body: checkoutSchema }), optionalA
 r.post("/orders/track/request-otp", trackLimiter, validate({ body: trackingOtpSchema }), orders.requestTrackingOtp);
 r.post("/orders/track", trackLimiter, validate({ body: trackOrderSchema }), orders.track);
 r.get("/orders", authenticate("customer"), cartOwner(), validate({ query: myOrdersQuery }), orders.myOrders);
+r.get("/orders/guest", optionalAuth("customer"), cartOwner(), validate({ query: myOrdersQuery }), orders.guestOrders);
 r.get("/orders/:orderNumber", optionalAuth("customer"), cartOwner(), orders.myOrder);
 r.post("/orders/:orderNumber/cancel", optionalAuth("customer"), cartOwner(), validate({ body: cancelSchema }), orders.cancelMyOrder);
 r.post("/orders/:orderNumber/abandon-payment", optionalAuth("customer"), cartOwner(), orders.abandonPayment);

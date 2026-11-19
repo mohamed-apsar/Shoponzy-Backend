@@ -37,8 +37,11 @@ export const checkoutSchema = z.object({
   .refine((v) => !v.checkoutMode || Boolean(v.items), { message: "Choose items to check out.", path: ["items"] })
   .refine((v) => v.checkoutMode !== "buy-now" || v.items?.length === 1, { message: "Buy Now requires one product option.", path: ["items"] });
 
-export const trackingOtpSchema = z.object({ orderNumber: z.string().trim().toUpperCase().regex(/^SZ\d{6,9}$/, "Check the order ID.").optional(), phone, email: email.optional() }).strict();
-export const trackOrderSchema = trackingOtpSchema.extend({ code: z.string().trim().regex(/^\d{4,10}$/, "Enter the SMS verification code.") });
+const trackingDetails = z.object({ orderNumber: z.string().trim().toUpperCase().regex(/^SZ\d{6,9}$/, "Check the order ID.").optional(), phone: phone.optional(), email: email.optional() }).strict();
+const hasTrackingContact = ({ phone, email }) => Boolean(phone || email);
+const trackingContactError = "Enter your checkout mobile number or email address.";
+export const trackingOtpSchema = trackingDetails.refine(hasTrackingContact, trackingContactError);
+export const trackOrderSchema = trackingDetails.extend({ code: z.string().trim().regex(/^\d{4,10}$/, "Enter the verification code.") }).refine(hasTrackingContact, trackingContactError);
 export const myOrdersQuery = z.object({ ...pagination });
 
 export const verifyPaymentSchema = z.object({

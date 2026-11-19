@@ -13,7 +13,7 @@ const schema = new mongoose.Schema({
 }, { collection: "tracking_email_codes" });
 const EmailCode = mongoose.model("TrackingEmailCode", schema);
 const hmac = (value) => createHmac("sha256", env.JWT_SECRET).update(value).digest("hex");
-const lookup = (phone, email) => hmac(`tracking-email:${phone}:${email}`);
+const lookup = (phone, email) => hmac(`tracking-email:${phone || ""}:${email}`);
 const digestFor = (id, code) => hmac(`tracking-code:${id}:${code}`);
 
 export function requireTrackingEmail() {

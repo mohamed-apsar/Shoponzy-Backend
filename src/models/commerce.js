@@ -121,6 +121,7 @@ const orderSchema = new mongoose.Schema({
 }, { timestamps: true });
 orderSchema.index({ createdAt: -1 });
 orderSchema.index({ "contact.phone": 1 });
+orderSchema.index({ "contact.email": 1 });
 orderSchema.index({ status: 1, reservationExpiresAt: 1 });
 orderSchema.index({ idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $type: "string" } } });
 toJSONPlugin(orderSchema, { hidden: ["guestId", "idempotencyKey"] });

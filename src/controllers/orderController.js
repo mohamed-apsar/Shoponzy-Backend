@@ -65,6 +65,19 @@ export async function myOrder(req, res) {
   ok(res, { order: orders.customerOrderView(order), payment, tracking });
 }
 
+export async function guestOrders(req, res) {
+  res.set("Cache-Control", "private, no-store");
+  const { skip, limit, meta } = paginate(req.valid.query);
+  if (!req.owner.guestId) return ok(res, [], meta(0));
+  const filter = { guestId: req.owner.guestId, user: { $exists: false }, status: { $ne: "pending_payment" } };
+  const [items, total] = await Promise.all([
+    Order.find(filter).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit)
+      .select("-_id orderNumber status items.name items.image items.qty placedAt createdAt total fulfilment.estimatedDeliveryDate").lean(),
+    Order.countDocuments(filter),
+  ]);
+  ok(res, items, meta(total));
+}
+
 export async function cancelMyOrder(req, res) {
   const order = await findOwnOrder(req);
   const updated = await orders.cancelOrder(order._id, { reason: req.valid.body.reason || "Cancelled by customer", by: req.owner.userId, byCustomer: true });
@@ -78,7 +91,7 @@ export async function abandonPayment(req, res) {
 }
 
 const trackingFilter = (phone, orderNumber, email) => ({
-  "contact.phone": phone,
+  ...(phone ? { "contact.phone": phone } : {}),
   status: { $ne: "pending_payment" },
   ...(orderNumber ? { orderNumber } : {}),
   ...(email ? { "contact.email": email } : {}),
