@@ -165,4 +165,5 @@ export const publicCategory = (c) => ({
   description: c.description, image: c.image, productImage: c.productImage, exploreImage: c.exploreImage, bannerImage: c.bannerImage,
   images: { image1: c.images?.image1 || null, image2: c.images?.image2 || null, image3: c.images?.image3 || null }, order: c.order, seo: c.seo, display: c.display,
   comingSoon: Boolean(c.comingSoon),
+  showOnHomepage: Boolean(c.showOnHomepage),
 });
