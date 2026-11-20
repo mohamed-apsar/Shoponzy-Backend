@@ -324,6 +324,10 @@ describe("order access, tracking and cancellation", () => {
     await admin.patch(`/admin/orders/${res.body.data.id}/status`, { status: "delivered", force: true }).expect(409);
     expect(alerts.cancelledCount).toBe(1);
     expect(alerts.cancellations[0].orderNumber).toBe(order.orderNumber);
+    expect(alerts.activity).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "order", status: "placed", orderNumber: order.orderNumber }),
+      expect.objectContaining({ source: "order", status: "cancelled", orderNumber: order.orderNumber }),
+    ]));
     await c.get("/admin/order-alerts").expect(401);
     await admin.patch(`/admin/orders/${res.body.data.id}/review-cancellation`, {}).expect(200);
     expect((await admin.get("/admin/order-alerts").expect(200)).body.data.cancelledCount).toBe(0);
@@ -388,6 +392,11 @@ describe("order access, tracking and cancellation", () => {
     await admin.post(`/admin/orders/${id}/refund`, {}).expect(400);
     const refunded = (await admin.post(`/admin/orders/${id}/refund`, { manualReference: "UPI-REF-1" }).expect(200)).body.data.order;
     expect(refunded).toMatchObject({ paymentStatus: "refunded", refundedAmount: delivered.total, refundRequired: false });
+    const activity = (await admin.get("/admin/order-alerts").expect(200)).body.data.activity;
+    expect(activity.filter((event) => event.orderNumber === order.orderNumber).map(({ source, status }) => [source, status])).toEqual([
+      ["refund", "processed"], ["order", "returned"], ["order", "delivered"], ["order", "out_for_delivery"],
+      ["order", "shipped"], ["order", "confirmed"], ["order", "placed"],
+    ]);
   });
 
   it("admin order list filters, searches, and the invoice escapes customer input", async () => {
