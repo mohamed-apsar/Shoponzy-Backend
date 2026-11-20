@@ -1,5 +1,10 @@
-import "dotenv/config";
+import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 import { z } from "zod";
+
+// Load the backend's local configuration even when launched from the repository root.
+// Runtime variables supplied by the deployment retain precedence.
+dotenv.config({ path: fileURLToPath(new URL("../../.env", import.meta.url)) });
 
 const bool = (fallback) => z.enum(["true", "false"]).default(String(fallback)).transform((v) => v === "true");
 const isTest = process.env.NODE_ENV === "test";
