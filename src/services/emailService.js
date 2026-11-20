@@ -2,11 +2,11 @@ import nodemailer from "nodemailer";
 import { env, smtpConfigured } from "../config/env.js";
 import { logger } from "../utils/logger.js";
 import { EmailLog } from "../models/notification.js";
+import { readBrevoSettings } from "./brevoSettings.js";
 
 let transport = null;
-function getTransport() {
-  if (transport) return transport;
-  if (!smtpConfigured) return null;
+function getEnvironmentTransport() {
+  if (transport || !smtpConfigured) return transport;
   transport = nodemailer.createTransport({
     host: env.SMTP_HOST, port: env.SMTP_PORT, secure: env.SMTP_SECURE,
     requireTLS: !env.SMTP_SECURE && env.SMTP_HOST.toLowerCase() === "smtp-relay.brevo.com",
@@ -15,7 +15,27 @@ function getTransport() {
   return transport;
 }
 export const setMailTransport = (t) => { transport = t; };
-export const emailEnabled = () => Boolean(getTransport());
+
+export function brevoTransport({ user, password }) {
+  return nodemailer.createTransport({
+    host: "smtp-relay.brevo.com", port: 587, secure: false, requireTLS: true,
+    connectionTimeout: 8000, greetingTimeout: 8000, socketTimeout: 12000,
+    auth: { user, pass: password },
+  });
+}
+
+async function mailConfiguration() {
+  const environment = getEnvironmentTransport();
+  if (environment) return { transport: environment, from: env.MAIL_FROM };
+  const saved = await readBrevoSettings();
+  return saved ? { transport: brevoTransport(saved), from: saved.from } : null;
+}
+
+export async function emailStatus() {
+  const mail = await mailConfiguration();
+  return { emailConfigured: Boolean(mail), mailFrom: mail?.from || env.MAIL_FROM, emailFromEnvironment: smtpConfigured };
+}
+export const emailEnabled = async () => (await emailStatus()).emailConfigured;
 
 const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const money = (n) => "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
@@ -27,13 +47,13 @@ export function logEmail({ to, subject, type = "other", status, error, ref }) {
 }
 
 export async function sendMail({ to, subject, text, html, headers, replyTo, type, ref }) {
-  const t = getTransport();
-  if (!t) {
+  const mail = await mailConfiguration();
+  if (!mail) {
     if (type) await logEmail({ to, subject, type, status: "skipped", error: "Email (SMTP) is not configured", ref });
     return { sent: false, reason: "not_configured" };
   }
   try {
-    await t.sendMail({ from: env.MAIL_FROM, to, subject, text, html, headers, replyTo });
+    await mail.transport.sendMail({ from: mail.from, to, subject, text, html, headers, replyTo });
   } catch (err) {
     if (type) await logEmail({ to, subject, type, status: "failed", error: err?.message, ref });
     throw err;

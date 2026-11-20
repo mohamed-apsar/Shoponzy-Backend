@@ -8,7 +8,7 @@ import { NewsletterSubscriber } from "../models/site.js";
 import { audit } from "../models/AuditLog.js";
 import { AppError } from "../utils/AppError.js";
 import { getSection } from "./settingsService.js";
-import { campaignEmail, emailEnabled, sendMail } from "./emailService.js";
+import { campaignEmail, emailEnabled, emailStatus, sendMail } from "./emailService.js";
 
 /* Promotional emails go only to newsletter subscribers (people who opted in). Each email carries a
    signed one-click unsubscribe link. Sending runs in small batches so each API request stays short
@@ -101,7 +101,7 @@ export async function cancelCampaign(id, actor) {
 export async function sendTest(id, email, actor, base) {
   const c = await Campaign.findById(id);
   if (!c) throw AppError.notFound("Notification not found.");
-  if (!emailEnabled()) throw new AppError(503, "EMAIL_NOT_CONFIGURED", "Email isn't set up on the server (SMTP settings are missing), so nothing can be sent yet.");
+  if (!(await emailEnabled())) throw new AppError(503, "EMAIL_NOT_CONFIGURED", "Email isn't set up on the server (SMTP settings are missing), so nothing can be sent yet.");
   const msg = await renderCampaign(c, { base, to: email });
   await sendMail({ to: email, ...msg, subject: `[TEST] ${msg.subject}`, type: "test", ref: String(c._id) }).catch((err) => {
     throw new AppError(502, "EMAIL_FAILED", `The test email could not be sent: ${err?.message || "mail server error"}.`);
@@ -114,7 +114,7 @@ export async function sendTest(id, email, actor, base) {
 
 /* Sends the next batch. The first call starts the campaign (draft → sending). Safe to call repeatedly. */
 export async function sendNextBatch(id, actor, base) {
-  if (!emailEnabled()) throw new AppError(503, "EMAIL_NOT_CONFIGURED", "Email isn't set up on the server (SMTP settings are missing), so nothing can be sent yet.");
+  if (!(await emailEnabled())) throw new AppError(503, "EMAIL_NOT_CONFIGURED", "Email isn't set up on the server (SMTP settings are missing), so nothing can be sent yet.");
   const now = new Date();
   const c = await Campaign.findOneAndUpdate(
     { _id: id, status: { $in: ["draft", "sending"] }, $or: [{ lockedUntil: null }, { lockedUntil: { $lt: now } }] },
@@ -181,7 +181,7 @@ export async function notificationSummary() {
   ]);
   const n = (rows, key) => rows.find((r) => r._id === key)?.n || 0;
   return {
-    subscribers, unsubscribed, emailConfigured: emailEnabled(), mailFrom: env.MAIL_FROM,
+    subscribers, unsubscribed, ...(await emailStatus()),
     campaigns: { draft: n(byStatus, "draft"), sending: n(byStatus, "sending"), sent: n(byStatus, "sent"), cancelled: n(byStatus, "cancelled") },
     last30Days: { sent: n(emails, "sent"), failed: n(emails, "failed"), skipped: n(emails, "skipped") },
   };

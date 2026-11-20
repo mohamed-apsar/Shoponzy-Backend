@@ -16,14 +16,14 @@ const hmac = (value) => createHmac("sha256", env.JWT_SECRET).update(value).diges
 const lookup = (phone, email) => hmac(`tracking-email:${phone || ""}:${email}`);
 const digestFor = (id, code) => hmac(`tracking-code:${id}:${code}`);
 
-export function requireTrackingEmail() {
-  if (!emailEnabled()) {
+export async function requireTrackingEmail() {
+  if (!(await emailEnabled())) {
     throw new AppError(503, "TRACKING_EMAIL_UNAVAILABLE", "Email verification is currently unavailable. Please contact Shoponzy support for help with your order.");
   }
 }
 
 export async function sendTrackingEmail(phone, email) {
-  requireTrackingEmail();
+  await requireTrackingEmail();
   const _id = lookup(phone, email);
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
   const digest = digestFor(_id, code);
@@ -51,7 +51,7 @@ export async function sendTrackingEmail(phone, email) {
 }
 
 export async function verifyTrackingEmail(phone, email, code) {
-  requireTrackingEmail();
+  await requireTrackingEmail();
   const _id = lookup(phone, email);
   const active = { _id, expiresAt: { $gt: new Date() }, attempts: { $gt: 0 } };
   if (await EmailCode.findOneAndUpdate({ ...active, digest: digestFor(_id, code) }, { $set: { attempts: 0 } })) return true;

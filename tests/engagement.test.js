@@ -1,11 +1,13 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
+import mongoose from "mongoose";
+import nodemailer from "nodemailer";
 import request from "supertest";
 import { API, app, browser, useDb } from "./helpers.js";
 import { ADDRESS, CONTACT, adminBrowser, customerBrowser, key, mockMail, simpleProduct } from "./fixtures.js";
 import { NewsletterSubscriber, ContactMessage } from "../src/models/site.js";
 import { Campaign, EmailLog } from "../src/models/notification.js";
 import { Coupon } from "../src/models/commerce.js";
-import { setMailTransport } from "../src/services/emailService.js";
+import { sendMail, setMailTransport } from "../src/services/emailService.js";
 import { BATCH_SIZE, unsubscribeToken } from "../src/services/campaignService.js";
 
 useDb();
@@ -40,6 +42,27 @@ describe("FAQ Management", () => {
 });
 
 describe("Notifications", () => {
+  it("verifies and encrypts a Brevo connection, then uses it for sending", async () => {
+    const credentials = { user: "login@example.com", password: "fake-test-key", from: "sender@example.com" };
+    const endpoint = "/admin/notifications/email-connection";
+    const verify = vi.fn().mockResolvedValue(true);
+    const send = vi.fn().mockResolvedValue({});
+    const create = vi.spyOn(nodemailer, "createTransport").mockReturnValue({ verify, sendMail: send });
+    try {
+      await (await customerBrowser()).put(endpoint, credentials).expect(401);
+      const saved = (await admin.put(endpoint, credentials).expect(200)).body.data;
+      expect(saved).toMatchObject({ emailConfigured: true, mailFrom: credentials.from });
+      expect(JSON.stringify(saved)).not.toContain(credentials.password);
+      const stored = await mongoose.model("BrevoSettings").findById("transactional-smtp").lean();
+      expect(JSON.stringify(stored)).not.toContain(credentials.password);
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ host: "smtp-relay.brevo.com", requireTLS: true, port: 587 }));
+      expect(verify).toHaveBeenCalledOnce();
+      await sendMail({ to: "recipient@example.com", subject: "Test", text: "Test" });
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ from: credentials.from }));
+    } finally {
+      create.mockRestore();
+    }
+  });
   async function subscribers(n) {
     await NewsletterSubscriber.insertMany(Array.from({ length: n }, (_, i) => ({ email: `fan${String(i).padStart(3, "0")}@example.com` })));
   }

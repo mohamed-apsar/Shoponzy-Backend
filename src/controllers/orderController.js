@@ -106,7 +106,7 @@ const trackingFilter = (phone, orderNumber, email) => ({
 
 export async function requestTrackingOtp(req, res) {
   const { orderNumber, phone, email } = req.valid.body;
-  if (email) requireTrackingEmail();
+  if (email) await requireTrackingEmail();
   else requireTrackingSms();
   const match = await Order.exists(trackingFilter(phone, orderNumber, email));
   if (match) {
@@ -124,7 +124,7 @@ export async function requestTrackingOtp(req, res) {
 
 export async function track(req, res) {
   const { orderNumber, phone, code, email } = req.valid.body;
-  if (email) requireTrackingEmail();
+  if (email) await requireTrackingEmail();
   else requireTrackingSms();
   const filter = trackingFilter(phone, orderNumber, email);
   const verify = () => email ? verifyTrackingEmail(phone, email, code) : verifyTrackingSms(phone, code);

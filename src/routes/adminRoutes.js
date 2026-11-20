@@ -174,6 +174,11 @@ router.delete("/faqs/:id", id, engagement.deleteFaq);
 
 /* Notifications (promotional emails to newsletter subscribers + order/return email switches) */
 router.get("/notifications/summary", engagement.notificationSummary);
+router.put("/notifications/email-connection", validate({ body: z.object({
+  user: z.string().trim().email().max(254),
+  password: z.string().trim().min(1).max(512),
+  from: z.string().trim().email().max(254),
+}).strict() }), engagement.configureBrevo);
 router.get("/notifications/settings", engagement.getNotificationSettings);
 router.put("/notifications/settings", validate({ body: notificationSettingsSchema }), engagement.updateNotificationSettings);
 router.get("/notifications/email-log", validate({ query: emailLogQuery }), engagement.emailLog);

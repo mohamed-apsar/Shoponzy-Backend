@@ -3,7 +3,9 @@ import { Campaign, EmailLog } from "../../models/notification.js";
 import { ContactMessage, Faq } from "../../models/site.js";
 import * as campaigns from "../../services/campaignService.js";
 import * as settings from "../../services/settingsService.js";
-import { emailEnabled, supportReplyEmail, trySendMail } from "../../services/emailService.js";
+import { brevoTransport, emailEnabled, emailStatus, supportReplyEmail, trySendMail } from "../../services/emailService.js";
+import { saveBrevoSettings } from "../../services/brevoSettings.js";
+import { smtpConfigured } from "../../config/env.js";
 import { AppError } from "../../utils/AppError.js";
 import { created, ok, paginate } from "../../utils/respond.js";
 import { MAX_EXPORT_ROWS, csvDate, sendCsv } from "../../utils/csv.js";
@@ -84,6 +86,19 @@ export async function exportFaqs(req, res) {
 /* ================= Notifications ================= */
 export const notificationSummary = async (_req, res) => ok(res, await campaigns.notificationSummary());
 
+export async function configureBrevo(req, res) {
+  if (smtpConfigured) throw AppError.conflict("Email is managed by the backend environment.");
+  const credentials = req.valid.body;
+  try {
+    await brevoTransport(credentials).verify();
+  } catch {
+    throw AppError.badRequest("Could not connect to Brevo. Check the SMTP login and key.");
+  }
+  await saveBrevoSettings(credentials);
+  await log(req, "notifications.brevo_configured", "EmailConfiguration", "brevo");
+  ok(res, await emailStatus());
+}
+
 export async function listCampaigns(req, res) {
   const { type, status, q, ...pageQ } = req.valid.query;
   const filter = {};
@@ -119,13 +134,13 @@ export async function previewCampaign(req, res) {
 }
 
 export async function getNotificationSettings(_req, res) {
-  ok(res, { settings: await settings.getSection("notifications"), emailConfigured: emailEnabled() });
+  ok(res, { settings: await settings.getSection("notifications"), emailConfigured: await emailEnabled() });
 }
 
 export async function updateNotificationSettings(req, res) {
   const { value } = await settings.updateSection("notifications", req.valid.body);
   await log(req, "notifications.settings_updated", "SiteSetting", "notifications", req.valid.body);
-  ok(res, { settings: value, emailConfigured: emailEnabled() });
+  ok(res, { settings: value, emailConfigured: await emailEnabled() });
 }
 
 export async function emailLog(req, res) {
@@ -197,7 +212,7 @@ export async function replySupport(req, res) {
   const reply = { message, by: req.auth.user._id, at: new Date(), emailed: false };
   if (sendEmail) {
     if (!msg.email) throw AppError.badRequest("This customer didn't leave an email address. Call them on the phone number instead, and record what you discussed with “Save without emailing”.");
-    if (!emailEnabled()) throw new AppError(503, "EMAIL_NOT_CONFIGURED", "Email isn't set up on the server, so the reply can't be emailed. Save it without emailing and contact the customer by phone.");
+    if (!(await emailEnabled())) throw new AppError(503, "EMAIL_NOT_CONFIGURED", "Email isn't set up on the server, so the reply can't be emailed. Save it without emailing and contact the customer by phone.");
     const result = await trySendMail({ to: msg.email, ...supportReplyEmail(msg, message), type: "support_reply", ref: String(msg._id) });
     if (!result.sent) throw new AppError(502, "EMAIL_FAILED", `The reply couldn't be emailed${result.error ? `: ${result.error}` : ""}. Nothing was saved; try again.`);
     reply.emailed = true;

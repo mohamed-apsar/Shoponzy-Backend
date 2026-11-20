@@ -127,7 +127,7 @@ export async function deleteAccount(userId, password) {
 
 /* ---------- Password reset ---------- */
 export async function forgotPassword(email) {
-  if (!emailEnabled()) throw new AppError(503, "EMAIL_NOT_CONFIGURED", "Password reset by email isn't available yet. Please contact support.");
+  if (!(await emailEnabled())) throw new AppError(503, "EMAIL_NOT_CONFIGURED", "Password reset by email isn't available yet. Please contact support.");
   const user = await User.findOne({ email, status: "active" });
   // Same response whether or not the account exists.
   if (!user) return;
