@@ -352,9 +352,12 @@ describe("public catalogue", () => {
 
   it("product detail exposes availability but not exact stock above the low-stock threshold", async () => {
     const s = await sneaker({ stock: 50 });
+    await Product.updateOne({ _id: s._id }, { $set: { sku: "SHOE-PRODUCT-CODE" } });
     await Product.updateOne({ _id: s._id, "variants._id": variantOf(s, "White", "7")._id }, { $set: { "variants.$.stock": 2 } });
     await Product.updateOne({ _id: s._id, "variants._id": variantOf(s, "White", "8")._id }, { $set: { "variants.$.stock": 0 } });
     const p = (await request(app).get(`${API}/products/${s.slug}`).expect(200)).body.data;
+    expect(p.sku).toBe("SHOE-PRODUCT-CODE");
+    expect(p.variants.find((v) => v.size === "7" && v.color === "White").sku).toBe(variantOf(s, "White", "7").sku);
     expect(p.variants.find((v) => v.size === "7" && v.color === "White")).toMatchObject({ inStock: true, stockLeft: 2 });
     expect(p.variants.find((v) => v.size === "8" && v.color === "White")).toMatchObject({ inStock: false, stockLeft: null });
     expect(p.variants.find((v) => v.size === "9" && v.color === "White")).toMatchObject({ inStock: true, stockLeft: null });

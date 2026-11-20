@@ -250,7 +250,7 @@ export const lowStockFilter = (threshold) => ({ $expr: { $gt: [{ $size: lowVaria
 export function publicProduct(p, { includeContentBlocks = false } = {}) {
   const low = env.LOW_STOCK_THRESHOLD;
   return {
-    id: String(p._id), slug: p.slug, legacyId: p.legacyId, name: p.name, brand: p.brand,
+    id: String(p._id), slug: p.slug, legacyId: p.legacyId, sku: p.sku, name: p.name, brand: p.brand,
     shortDescription: p.shortDescription, description: p.description,
     category: p.category && typeof p.category === "object" && p.category.path
       ? { id: String(p.category._id), name: p.category.name, slug: p.category.slug, path: p.category.path }
