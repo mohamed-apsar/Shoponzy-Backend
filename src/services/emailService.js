@@ -9,6 +9,7 @@ function getTransport() {
   if (!smtpConfigured) return null;
   transport = nodemailer.createTransport({
     host: env.SMTP_HOST, port: env.SMTP_PORT, secure: env.SMTP_SECURE,
+    requireTLS: !env.SMTP_SECURE && env.SMTP_HOST.toLowerCase() === "smtp-relay.brevo.com",
     auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
   });
   return transport;
