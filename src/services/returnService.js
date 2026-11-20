@@ -158,6 +158,7 @@ export async function createReturn({ order, owner, input, ip }) {
   });
   await Order.updateOne({ _id: order._id }, { $push: { history: { status: order.status, note: `Return ${rr.returnNumber} requested`, at: new Date() } } });
   await audit("return.requested", { actor: owner.userId, entity: "ReturnRequest", entityId: rr._id, ip, meta: { returnNumber: rr.returnNumber, orderNumber: order.orderNumber, items: items.length } });
+  await sendReturnEmail(rr, "requested");
   return rr;
 }
 
@@ -169,6 +170,7 @@ export async function cancelByCustomer(rr, owner) {
   );
   if (!updated) throw new AppError(409, "INVALID_TRANSITION", "This return can no longer be cancelled online.");
   await audit("return.cancelled", { actor: owner.userId, entity: "ReturnRequest", entityId: rr._id, meta: { by: "customer" } });
+  await sendReturnEmail(updated, "cancelled");
   return updated;
 }
 
@@ -218,7 +220,7 @@ export async function approve(id, { note }, actor) {
       "refund.amount": paid ? maxRefundFor(rr.items, order) : null,
     },
   });
-  sendReturnEmail(updated, "approved");
+  await sendReturnEmail(updated, "approved");
   return updated;
 }
 
@@ -228,7 +230,7 @@ export async function reject(id, { reason, note }, actor) {
     note: `Rejected: ${reason}`,
     set: { decidedBy: actor._id, decidedAt: new Date(), rejectionReason: reason, adminNote: note || rr.adminNote, "refund.status": "not_applicable" },
   });
-  sendReturnEmail(updated, "rejected");
+  await sendReturnEmail(updated, "rejected");
   return updated;
 }
 
@@ -251,6 +253,7 @@ export async function setStatus(id, { status, note, pickup }, actor) {
   }
   const updated = await transition(rr, status, actor, { note, set });
   if (status === "completed") await markOrderReturnedIfFullyReturned(updated, actor);
+  await sendReturnEmail(updated, status);
   return updated;
 }
 
@@ -265,7 +268,7 @@ async function markOrderReturnedIfFullyReturned(rr, actor) {
   ]);
   const back = new Map(done.map((d) => [String(d._id), d.qty]));
   if (order.items.every((it) => (back.get(String(it.variant)) || 0) >= it.qty)) {
-    await updateOrderStatus(order._id, { status: "returned", note: `All items returned (${rr.returnNumber})`, restock: false }, actor);
+    await updateOrderStatus(order._id, { status: "returned", note: `All items returned (${rr.returnNumber})`, restock: false, notifyCustomer: false }, actor);
   }
 }
 
@@ -300,6 +303,7 @@ export async function inspect(id, { items, notes }, actor) {
     return rr;
   });
   await audit("return.inspected", { actor: actor._id, entity: "ReturnRequest", entityId: updated._id, meta: { returnNumber: updated.returnNumber, items: items.map(({ index, condition, restockQty }) => ({ index, condition, restockQty })) } });
+  await sendReturnEmail(updated, "inspected");
   return updated;
 }
 
@@ -351,7 +355,7 @@ export async function refund(id, { amount, manualReference, note }, actor) {
     $push: { history: { refundStatus: status, note: `Refund ₹${r.amount} ${completed ? "processed" : "initiated"} (${r.refundId})`, by: actor._id, at: new Date() } },
   }, { new: true });
   await audit("return.refunded", { actor: actor._id, entity: "ReturnRequest", entityId: rr._id, meta: { returnNumber: rr.returnNumber, amount: r.amount, refundId: r.refundId, status: r.status } });
-  if (completed) sendReturnEmail(updated, "refunded");
+  if (updated) await sendReturnEmail(updated, completed ? "refunded" : "refund_pending");
   return updated;
 }
 

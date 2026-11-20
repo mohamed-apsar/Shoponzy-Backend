@@ -11,15 +11,19 @@ import { getSection } from "./settingsService.js";
 import { getCart, priceCart } from "./cartService.js";
 import { getRazorpay, paymentMethodDetails, toPaise } from "./razorpayService.js";
 import { orderConfirmationEmail, orderStatusEmail, trySendMail } from "./emailService.js";
-import { notifyReturnRefunded } from "./notifyService.js";
+import { sendReturnEmail } from "./notifyService.js";
 
-/* Order-update emails respect the switches in Notifications → Email Notifications. Fire-and-forget. */
-const ORDER_EMAIL_SWITCH = { confirmation: "orderConfirmation", shipped: "orderShipped", delivered: "orderDelivered", cancelled: "orderCancelled" };
-function sendOrderEmail(order, kind) {
+const ORDER_EMAIL_SWITCH = {
+  confirmation: "orderConfirmation", confirmed: "orderProgress", packed: "orderProgress",
+  shipped: "orderShipped", out_for_delivery: "orderProgress", delivered: "orderDelivered",
+  cancelled: "orderCancelled", returned: "returnUpdates",
+  refund_pending: "orderRefunds", refund_processed: "orderRefunds", refund_failed: "orderRefunds",
+};
+function sendOrderEmail(order, kind, amount) {
   if (!order?.contact?.email) return;
-  const message = kind === "confirmation" ? orderConfirmationEmail(order) : orderStatusEmail(order, kind);
+  const message = kind === "confirmation" ? orderConfirmationEmail(order) : orderStatusEmail(order, kind, amount);
   if (!message) return;
-  getSection("notifications").then((n) => {
+  return getSection("notifications").then((n) => {
     if (n[ORDER_EMAIL_SWITCH[kind]] === false) return;
     return trySendMail({ to: order.contact.email, ...message, type: kind === "confirmation" ? "order_confirmation" : "order_status", ref: order.orderNumber });
   }).catch(() => {});
@@ -224,7 +228,7 @@ export async function createOrder({ owner, input, ip }) {
       throw new AppError(502, "PAYMENT_GATEWAY_ERROR", "We couldn't start the online payment. Your bag has been kept — please try again or choose Cash on delivery.");
     }
   } else if (order.contact.email) {
-    sendOrderEmail(order, "confirmation");
+    await sendOrderEmail(order, "confirmation");
   }
   await audit("order.created", { actor: owner.userId, entity: "Order", entityId: order._id, ip, meta: { orderNumber: order.orderNumber, total: order.total, paymentMethod: order.paymentMethod } });
   return { order, payment: await paymentPayload(order) };
@@ -269,8 +273,10 @@ export async function markPaid(order, { providerPaymentId, method, details, amou
         $push: { history: { status: "placed", note: `Payment received (${via})`, at: now } } },
       { new: true },
     );
-    if (updated) sendOrderEmail(updated, "confirmation");
-    if (updated) return updated;
+    if (updated) {
+      await sendOrderEmail(updated, "confirmation");
+      return updated;
+    }
     // Dismissal may have released the reservation while the gateway was confirming payment.
     const current = await Order.findById(order._id);
     return markPaid(current, { providerPaymentId, method, details, amountPaise, via });
@@ -278,15 +284,19 @@ export async function markPaid(order, { providerPaymentId, method, details, amou
 
   // Paid after the reservation expired: try to take the stock again.
   try {
-    return await inTransaction(async (session) => {
+    const { placed, changed } = await inTransaction(async (session) => {
+      const current = await Order.findById(order._id).session(session);
+      if (["paid", "refunded", "partially_refunded"].includes(current.paymentStatus)) return { placed: current, changed: false };
       await takeStock(order.items, order._id, session);
       await InventoryMovement.updateMany({ order: order._id, reason: "order", createdAt: { $gte: now } }, { $set: { reason: "late_payment" } }, { session });
       const o = await Order.findByIdAndUpdate(order._id, {
         $set: { paymentStatus: "paid", status: "placed", stockReserved: true, placedAt: now, cancelReason: null, reservationExpiresAt: null },
         $push: { history: { status: "placed", note: `Payment received after the reservation expired; stock re-reserved (${via})`, at: now } },
       }, { new: true, session });
-      return o;
+      return { placed: o, changed: true };
     });
+    if (changed) await sendOrderEmail(placed, "confirmation");
+    return placed;
   } catch (err) {
     if (!(err instanceof AppError)) throw err;
     const o = await Order.findByIdAndUpdate(order._id, {
@@ -347,14 +357,14 @@ export async function cancelOrder(orderId, { reason, by, byCustomer = false, sys
     order.history.push({ status: "cancelled", note: reason, by, at: new Date() });
     await order.save({ session });
     return order;
-  }).then((order) => {
-    if (!system) sendOrderEmail(order, "cancelled");
+  }).then(async (order) => {
+    if (!system) await sendOrderEmail(order, "cancelled");
     return order;
   });
 }
 
 /* ---------- Admin status changes ---------- */
-export async function updateStatus(orderId, { status, note, fulfilment, restock = true }, actor) {
+export async function updateStatus(orderId, { status, note, fulfilment, restock = true, notifyCustomer = true }, actor) {
   if (status === "cancelled") return cancelOrder(orderId, { reason: note || "Cancelled by store", by: actor._id });
   const order = await inTransaction(async (session) => {
     const order = await Order.findById(orderId).session(session);
@@ -389,7 +399,7 @@ export async function updateStatus(orderId, { status, note, fulfilment, restock 
     return order;
   });
   await audit("order.status_changed", { actor: actor._id, entity: "Order", entityId: order._id, meta: { orderNumber: order.orderNumber, status } });
-  sendOrderEmail(order, status);
+  if (notifyCustomer) await sendOrderEmail(order, status);
   return order;
 }
 
@@ -457,6 +467,7 @@ export async function issueRefund(orderId, { amount, reason, manualReference, re
       await payment.save();
     }
     await audit("order.refunded", { actor: actor._id, entity: "Order", entityId: order._id, meta: { orderNumber: order.orderNumber, amount: value, refundId, status: refundStatus, returnRequest: returnRequest && String(returnRequest) } });
+    if (!returnRequest) await sendOrderEmail(order, `refund_${refundStatus}`, value);
     return { order, refund: { refundId, amount: value, status: refundStatus, payment: payment?._id, providerPaymentId: payment?.providerPaymentId } };
   } finally {
     // Released on every path (the success path already cleared it on the saved order).
@@ -506,7 +517,14 @@ export async function applyRefundStatus({ refundId, status, failureReason, via }
     });
   }
   await audit("refund.status_changed", { entity: "Payment", entityId: payment._id, meta: { refundId, status, via } });
-  if (status === "processed") await notifyReturnRefunded(refundId).catch(() => {});
+  if (status === "processed" || status === "failed") {
+    if (entry.returnRequest) {
+      await ReturnRequest.findOne({ "refund.refundId": refundId }).lean()
+        .then((rr) => sendReturnEmail(rr, status === "processed" ? "refunded" : "refund_failed")).catch(() => {});
+    } else {
+      await Order.findById(payment.order).then((order) => sendOrderEmail(order, `refund_${status}`, entry.amount)).catch(() => {});
+    }
+  }
   return { payment, entry, changed: true };
 }
 

@@ -55,7 +55,7 @@ export const DEFAULT_SETTINGS = {
   returns: { reasons: DEFAULT_RETURN_REASONS },
   // Admin-only: which automatic emails are sent (Notifications → Email Notifications).
   notifications: {
-    orderConfirmation: true, orderShipped: true, orderDelivered: true, orderCancelled: true,
+    orderConfirmation: true, orderProgress: true, orderShipped: true, orderDelivered: true, orderCancelled: true, orderRefunds: true,
     returnUpdates: true, supportAutoReply: true,
   },
 };

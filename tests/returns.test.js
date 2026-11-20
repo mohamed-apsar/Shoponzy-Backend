@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { describe, expect, it, beforeEach } from "vitest";
 import request from "supertest";
 import { API, app, browser, useDb } from "./helpers.js";
-import { ADDRESS, CONTACT, adminBrowser, customerBrowser, key, mockCloudinary, mockRazorpay, simpleProduct, sneaker, variantOf } from "./fixtures.js";
+import { ADDRESS, CONTACT, adminBrowser, customerBrowser, key, mockCloudinary, mockMail, mockRazorpay, simpleProduct, sneaker, variantOf } from "./fixtures.js";
 import { Product } from "../src/models/Product.js";
 import { InventoryMovement, Order, Payment, ReturnRequest } from "../src/models/commerce.js";
 import { SiteSetting } from "../src/models/site.js";
@@ -164,6 +164,7 @@ describe("return reasons", () => {
 
 describe("admin return workflow", () => {
   it("approve → receive → inspect (restock) → refund (COD manual) → complete", async () => {
+    const sent = mockMail();
     const { b, order, walletVariant, shoeVariant } = await deliveredOrder();
     const rr = (await requestReturn(b, order, { items: [{ variantId: String(walletVariant._id), qty: 2 }, { variantId: String(shoeVariant._id), qty: 1 }], reason: "defective", comments: "Stitching came apart" }).expect(201)).body.data;
     const url = `/admin/returns/${rr.id}`;
@@ -206,6 +207,9 @@ describe("admin return workflow", () => {
     expect(await Order.findById(order._id).lean()).toMatchObject({ refundedAmount: 1500, paymentStatus: "partially_refunded" });
 
     const done = (await admin.post(`${url}/status`, { status: "completed" }).expect(200)).body.data;
+    expect(sent.filter((message) => message.to === CONTACT.email && message.subject.startsWith(`Return ${done.returnNumber}:`)).map((message) => message.subject.split(": ")[1])).toEqual([
+      "requested", "approved", "pickup scheduled", "in transit", "received", "inspected", "refund issued", "completed",
+    ]);
     expect(done.status).toBe("completed");
     // Every unit came back, so the order is marked returned — without restocking again.
     expect((await Order.findById(order._id).lean()).status).toBe("returned");

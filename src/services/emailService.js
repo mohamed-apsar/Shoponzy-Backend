@@ -5,11 +5,13 @@ import { EmailLog } from "../models/notification.js";
 import { readBrevoSettings } from "./brevoSettings.js";
 
 let transport = null;
+const smtpTimeouts = { connectionTimeout: 8000, greetingTimeout: 8000, socketTimeout: 12000 };
 function getEnvironmentTransport() {
   if (transport || !smtpConfigured) return transport;
   transport = nodemailer.createTransport({
     host: env.SMTP_HOST, port: env.SMTP_PORT, secure: env.SMTP_SECURE,
     requireTLS: !env.SMTP_SECURE && env.SMTP_HOST.toLowerCase() === "smtp-relay.brevo.com",
+    ...smtpTimeouts,
     auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
   });
   return transport;
@@ -19,7 +21,7 @@ export const setMailTransport = (t) => { transport = t; };
 export function brevoTransport({ user, password }) {
   return nodemailer.createTransport({
     host: "smtp-relay.brevo.com", port: 587, secure: false, requireTLS: true,
-    connectionTimeout: 8000, greetingTimeout: 8000, socketTimeout: 12000,
+    ...smtpTimeouts,
     auth: { user, pass: password },
   });
 }
@@ -90,14 +92,23 @@ export function orderConfirmationEmail(order) {
   };
 }
 
-export function orderStatusEmail(order, status) {
+export function orderStatusEmail(order, status, amount) {
+  const tracking = order.fulfilment?.trackingUrl ? `\nTrack it: ${order.fulfilment.trackingUrl}` : order.fulfilment?.trackingNumber ? `\nTracking number: ${order.fulfilment.trackingNumber} (${order.fulfilment.courier || "courier"})` : "";
   const lines = {
-    shipped: `Your order ${order.orderNumber} is on its way.${order.fulfilment?.trackingUrl ? `\nTrack it: ${order.fulfilment.trackingUrl}` : order.fulfilment?.trackingNumber ? `\nTracking number: ${order.fulfilment.trackingNumber} (${order.fulfilment.courier || "courier"})` : ""}`,
+    confirmed: `We confirmed your order ${order.orderNumber} and will prepare it for dispatch.`,
+    packed: `Your order ${order.orderNumber} is packed and ready for dispatch.`,
+    shipped: `Your order ${order.orderNumber} is on its way.${tracking}`,
+    out_for_delivery: `Your order ${order.orderNumber} is out for delivery.${tracking}`,
     delivered: `Your order ${order.orderNumber} has been delivered. We hope you love it!`,
-    cancelled: `Your order ${order.orderNumber} has been cancelled.${order.paymentStatus === "paid" ? " Your refund will be processed to the original payment method." : ""}`,
+    cancelled: `Your order ${order.orderNumber} has been cancelled.${order.refundRequired ? " We’ll send an update when your refund is processed." : ""}`,
+    returned: `Your order ${order.orderNumber} has been marked as returned.`,
+    refund_pending: `We initiated a refund of ${money(amount)} for order ${order.orderNumber}. We’ll let you know when it is processed.`,
+    refund_processed: `We issued a refund of ${money(amount)} for order ${order.orderNumber}.`,
+    refund_failed: `The refund of ${money(amount)} for order ${order.orderNumber} could not be processed. Please contact Shoponzy support for an update.`,
   };
   if (!lines[status]) return null;
-  return { subject: `Order ${order.orderNumber}: ${status}`, text: `Hi ${order.contact.name},\n\n${lines[status]}\n\nShoponzy`, html: `<p>Hi ${escapeHtml(order.contact.name)},</p><p>${escapeHtml(lines[status]).replace(/\n/g, "<br>")}</p><p>Shoponzy</p>` };
+  const label = status === "refund_processed" ? "refund issued" : status.replaceAll("_", " ");
+  return { subject: `Order ${order.orderNumber}: ${label}`, text: `Hi ${order.contact.name},\n\n${lines[status]}\n\nShoponzy`, html: `<p>Hi ${escapeHtml(order.contact.name)},</p><p>${escapeHtml(lines[status]).replace(/\n/g, "<br>")}</p><p>Shoponzy</p>` };
 }
 
 /* ---------- Shared branded layout for marketing and support emails ---------- */
@@ -138,17 +149,26 @@ export function campaignEmail(c, { products = [], shopUrl, unsubscribeUrl }) {
   return { subject: c.subject, html, text };
 }
 
-/* Return request updates (approved / rejected / refund issued). */
+/* Return request and refund updates. */
 export function returnUpdateEmail(rr, event) {
   const lines = {
+    requested: `We received your return request ${rr.returnNumber} for order ${rr.orderNumber}.`,
     approved: `Your return ${rr.returnNumber} for order ${rr.orderNumber} has been approved. We will arrange the pickup or tell you where to send the items. Your refund is issued after we receive and check them.`,
     rejected: `We could not accept your return ${rr.returnNumber} for order ${rr.orderNumber}.${rr.rejectionReason ? `\n\nReason: ${rr.rejectionReason}` : ""}\n\nReply to this email if you have questions.`,
-    refunded: `We have issued a refund of ${money(rr.refund?.amount || 0)} for your return ${rr.returnNumber}. Online payments reach your account in 5–7 working days.`,
+    pickup_scheduled: `Pickup has been scheduled for your return ${rr.returnNumber}.`,
+    in_transit: `Your return ${rr.returnNumber} has been picked up.`,
+    received: `We received the items for your return ${rr.returnNumber}.`,
+    inspected: `We inspected the items for your return ${rr.returnNumber}.`,
+    completed: `Your return ${rr.returnNumber} for order ${rr.orderNumber} is complete.`,
+    cancelled: `Your return request ${rr.returnNumber} has been cancelled.`,
+    refund_pending: `We initiated a refund of ${money(rr.refund?.amount || 0)} for your return ${rr.returnNumber}.`,
+    refunded: `We issued a refund of ${money(rr.refund?.amount || 0)} for your return ${rr.returnNumber}.`,
+    refund_failed: `The refund for your return ${rr.returnNumber} could not be processed. Please contact Shoponzy support for an update.`,
   };
   if (!lines[event]) return null;
   const name = rr.contact?.name || "there";
   return {
-    subject: `Return ${rr.returnNumber}: ${event === "refunded" ? "refund issued" : event}`,
+    subject: `Return ${rr.returnNumber}: ${event === "refunded" ? "refund issued" : event.replaceAll("_", " ")}`,
     text: `Hi ${name},\n\n${lines[event]}\n\nShoponzy`,
     html: layout({ body: `<p>Hi ${escapeHtml(name)},</p>${paragraphs(lines[event])}<p>Shoponzy</p>` }),
   };

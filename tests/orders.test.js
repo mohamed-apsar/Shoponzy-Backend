@@ -314,6 +314,7 @@ describe("order access, tracking and cancellation", () => {
   });
 
   it("customers can cancel before dispatch: stock and coupon usage come back", async () => {
+    const sent = mockMail();
     await Coupon.create({ code: "TEN", type: "fixed", value: 10 });
     const c = await customerBrowser();
     const w = await simpleProduct({ stock: 5 });
@@ -323,6 +324,7 @@ describe("order access, tracking and cancellation", () => {
     expect(await stockOf(w._id, w.variants[0]._id)).toBe(3);
     const res = await c.post(`/orders/${order.orderNumber}/cancel`, { reason: "Changed my mind" }).expect(200);
     expect(res.body.data.status).toBe("cancelled");
+    expect(sent.filter((message) => message.subject === `Order ${order.orderNumber}: cancelled`)).toMatchObject([{ to: CONTACT.email }]);
     expect(await stockOf(w._id, w.variants[0]._id)).toBe(5);
     expect((await Coupon.findOne({ code: "TEN" })).usedCount).toBe(0);
     const admin = await adminBrowser();
@@ -366,11 +368,11 @@ describe("order access, tracking and cancellation", () => {
 
     expect((await admin.patch(`/admin/orders/${id}/status`, { status: "delivered" }).expect(409)).body.error.code).toBe("INVALID_TRANSITION");
     await admin.patch(`/admin/orders/${id}/status`, { status: "confirmed" }).expect(200);
+    await admin.patch(`/admin/orders/${id}/status`, { status: "packed" }).expect(200);
     const shipped = await admin.patch(`/admin/orders/${id}/status`, { status: "shipped", fulfilment: { courier: "Delhivery", trackingNumber: "DLV123", trackingUrl: "https://track.example/DLV123" } }).expect(200);
     expect(shipped.body.data.order.fulfilment).toMatchObject({ courier: "Delhivery", trackingNumber: "DLV123" });
     expect(shipped.body.data.allowedTransitions).toEqual(["out_for_delivery", "delivered", "returned"]);
-    // Order emails are sent in the background (after the email-switch setting is read), so wait for it.
-    await vi.waitFor(() => expect(sent.some((m) => m.subject === `Order ${order.orderNumber}: shipped` && m.text.includes("https://track.example/DLV123"))).toBe(true));
+    expect(sent.some((m) => m.subject === `Order ${order.orderNumber}: shipped` && m.text.includes("https://track.example/DLV123"))).toBe(true);
     await admin.post(`/admin/orders/${id}/cancel`, {}).expect(409); // can't cancel once shipped
     await admin.patch(`/admin/orders/${id}/fulfilment`, { estimatedDeliveryDate: "2027-01-01" }).expect(200);
     await admin.patch(`/admin/orders/${id}/status`, { status: "out_for_delivery" }).expect(200);
@@ -392,16 +394,20 @@ describe("order access, tracking and cancellation", () => {
     const returned = (await admin.patch(`/admin/orders/${id}/status`, { status: "returned", note: "Customer returned", restock: true }).expect(200)).body.data.order;
     expect(returned).toMatchObject({ status: "returned", refundRequired: true });
     expect(await stockOf(product._id, product.variants[0]._id)).toBe(before + 2);
-    expect(returned.history.map((h) => h.status)).toEqual(["placed", "confirmed", "shipped", "out_for_delivery", "delivered", "returned"]);
+    expect(returned.history.map((h) => h.status)).toEqual(["placed", "confirmed", "packed", "shipped", "out_for_delivery", "delivered", "returned"]);
 
     // COD refunds are paid outside the gateway and need a reference.
     await admin.post(`/admin/orders/${id}/refund`, {}).expect(400);
     const refunded = (await admin.post(`/admin/orders/${id}/refund`, { manualReference: "UPI-REF-1" }).expect(200)).body.data.order;
     expect(refunded).toMatchObject({ paymentStatus: "refunded", refundedAmount: delivered.total, refundRequired: false });
+    expect(sent.filter((message) => message.to === CONTACT.email).map((message) => message.subject)).toEqual([
+      `Order ${order.orderNumber} confirmed`,
+      ...["confirmed", "packed", "shipped", "out for delivery", "delivered", "returned", "refund issued"].map((status) => `Order ${order.orderNumber}: ${status}`),
+    ]);
     const activity = (await admin.get("/admin/order-alerts").expect(200)).body.data.activity;
     expect(activity.filter((event) => event.orderNumber === order.orderNumber).map(({ source, status }) => [source, status])).toEqual([
       ["refund", "processed"], ["order", "returned"], ["order", "delivered"], ["order", "out_for_delivery"],
-      ["order", "shipped"], ["order", "confirmed"], ["order", "placed"],
+      ["order", "shipped"], ["order", "packed"], ["order", "confirmed"], ["order", "placed"],
     ]);
   });
 

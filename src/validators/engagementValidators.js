@@ -39,7 +39,7 @@ export const campaignListQuery = z.object({ ...pagination, type: z.enum(CAMPAIGN
 export const testSendSchema = z.object({ email }).strict();
 
 export const notificationSettingsSchema = z.object({
-  orderConfirmation: z.boolean(), orderShipped: z.boolean(), orderDelivered: z.boolean(), orderCancelled: z.boolean(),
+  orderConfirmation: z.boolean(), orderProgress: z.boolean(), orderShipped: z.boolean(), orderDelivered: z.boolean(), orderCancelled: z.boolean(), orderRefunds: z.boolean(),
   returnUpdates: z.boolean(), supportAutoReply: z.boolean(),
 }).partial().strict();
 export const emailLogQuery = z.object({ ...pagination, type: z.enum(EMAIL_TYPES).optional(), status: z.enum(["sent", "failed", "skipped"]).optional(), q: z.string().trim().max(100).optional(), ...dateRange });
