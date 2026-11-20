@@ -249,6 +249,10 @@ describe("order access, tracking and cancellation", () => {
     expect((await otherGuest.get("/orders/guest").expect(200)).body.data.map((entry) => entry.orderNumber)).toEqual([otherOrder.orderNumber]);
     expect((await (await browser()).get("/orders/guest").expect(200)).body.data).toEqual([]);
     await guest.get(`/orders/${order.orderNumber}`).expect(200);
+    const invoice = await guest.get(`/orders/${order.orderNumber}/invoice`).expect(200).expect("Content-Type", /text\/html/);
+    expect(invoice.text).toContain(`Invoice / Order ${order.orderNumber}`);
+    expect(invoice.headers["cache-control"]).toBe("private, no-store");
+    await otherGuest.get(`/orders/${order.orderNumber}/invoice`).expect(404);
     await (await browser()).get(`/orders/${order.orderNumber}`).expect(404);
     await (await customerBrowser()).get(`/orders/${order.orderNumber}`).expect(404);
   });
@@ -258,6 +262,8 @@ describe("order access, tracking and cancellation", () => {
     const { order } = await placeOrder(a);
     expect((await b.get("/orders").expect(200)).body.meta.total).toBe(0);
     await b.get(`/orders/${order.orderNumber}`).expect(404);
+    await a.get(`/orders/${order.orderNumber}/invoice`).expect(200).expect("Content-Type", /text\/html/);
+    await b.get(`/orders/${order.orderNumber}/invoice`).expect(404);
     await request(app).get(`${API}/orders`).expect(401);
   });
 

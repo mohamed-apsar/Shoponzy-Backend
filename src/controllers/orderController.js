@@ -5,6 +5,7 @@ import { getRazorpay, paymentFailure, paymentMethodDetails, verifyCheckoutSignat
 import { AppError } from "../utils/AppError.js";
 import { logger } from "../utils/logger.js";
 import { created, ok, paginate } from "../utils/respond.js";
+import { sendInvoice } from "../services/invoiceService.js";
 import { requireTrackingSms, sendTrackingSms, verifyTrackingSms } from "../services/trackingSmsService.js";
 import { requireTrackingEmail, sendTrackingEmail, verifyTrackingEmail } from "../services/trackingEmailService.js";
 
@@ -63,6 +64,12 @@ export async function myOrder(req, res) {
   const [payment, tracking] = await Promise.all([orders.paymentPayload(order), trackingView(order)]);
   res.set("Cache-Control", "private, no-store");
   ok(res, { order: orders.customerOrderView(order), payment, tracking });
+}
+
+export async function myInvoice(req, res) {
+  const order = await findOwnOrder(req);
+  if (order.status === "pending_payment") throw AppError.notFound("Invoice not available.");
+  return sendInvoice(res, order);
 }
 
 export async function guestOrders(req, res) {
