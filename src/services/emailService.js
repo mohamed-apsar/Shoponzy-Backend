@@ -39,6 +39,19 @@ export async function emailStatus() {
 }
 export const emailEnabled = async () => (await emailStatus()).emailConfigured;
 
+export function smtpFailureMessage(error) {
+  if (error?.responseCode === 525) return "SMTP 525: The mail relay blocked this backend’s outbound IP. Authorize the backend’s outbound IP in Brevo, then test again.";
+  if (error?.responseCode === 535 || error?.code === "EAUTH") return "The SMTP relay rejected authentication. Check the SMTP login and key.";
+  return "Could not complete the SMTP request. Check the relay settings and connectivity.";
+}
+
+export async function verifyEmailConnection() {
+  const mail = await mailConfiguration();
+  if (!mail) return false;
+  await mail.transport.verify();
+  return true;
+}
+
 const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const money = (n) => "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 
@@ -57,7 +70,7 @@ export async function sendMail({ to, subject, text, html, headers, replyTo, type
   try {
     await mail.transport.sendMail({ from: mail.from, to, subject, text, html, headers, replyTo });
   } catch (err) {
-    if (type) await logEmail({ to, subject, type, status: "failed", error: err?.message, ref });
+    if (type) await logEmail({ to, subject, type, status: "failed", error: err?.responseCode === 525 ? smtpFailureMessage(err) : err?.message, ref });
     throw err;
   }
   if (type) await logEmail({ to, subject, type, status: "sent", ref });

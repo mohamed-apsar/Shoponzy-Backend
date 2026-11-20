@@ -174,6 +174,7 @@ router.delete("/faqs/:id", id, engagement.deleteFaq);
 
 /* Notifications (promotional emails to newsletter subscribers + order/return email switches) */
 router.get("/notifications/summary", engagement.notificationSummary);
+router.post("/notifications/email-connection/test", engagement.testEmailConnection);
 router.put("/notifications/email-connection", validate({ body: z.object({
   user: z.string().trim().email().max(254),
   password: z.string().trim().min(1).max(512),

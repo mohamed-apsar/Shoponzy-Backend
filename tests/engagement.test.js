@@ -57,6 +57,11 @@ describe("Notifications", () => {
       expect(JSON.stringify(stored)).not.toContain(credentials.password);
       expect(create).toHaveBeenCalledWith(expect.objectContaining({ host: "smtp-relay.brevo.com", requireTLS: true, port: 587 }));
       expect(verify).toHaveBeenCalledOnce();
+      await admin.post(endpoint + "/test").expect(200);
+      verify.mockRejectedValueOnce(Object.assign(new Error("provider response"), { responseCode: 525 }));
+      const failure = (await admin.post(endpoint + "/test").expect(502)).body.error;
+      expect(failure).toMatchObject({ code: "SMTP_CONNECTION_FAILED", message: expect.stringContaining("outbound IP") });
+      expect(failure.message).not.toContain("provider response");
       await sendMail({ to: "recipient@example.com", subject: "Test", text: "Test" });
       expect(send).toHaveBeenCalledWith(expect.objectContaining({ from: credentials.from }));
     } finally {

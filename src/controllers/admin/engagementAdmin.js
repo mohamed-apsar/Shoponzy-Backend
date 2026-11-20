@@ -3,7 +3,7 @@ import { Campaign, EmailLog } from "../../models/notification.js";
 import { ContactMessage, Faq } from "../../models/site.js";
 import * as campaigns from "../../services/campaignService.js";
 import * as settings from "../../services/settingsService.js";
-import { brevoTransport, emailEnabled, emailStatus, supportReplyEmail, trySendMail } from "../../services/emailService.js";
+import { brevoTransport, emailEnabled, emailStatus, smtpFailureMessage, supportReplyEmail, trySendMail, verifyEmailConnection } from "../../services/emailService.js";
 import { saveBrevoSettings } from "../../services/brevoSettings.js";
 import { smtpConfigured } from "../../config/env.js";
 import { AppError } from "../../utils/AppError.js";
@@ -91,12 +91,23 @@ export async function configureBrevo(req, res) {
   const credentials = req.valid.body;
   try {
     await brevoTransport(credentials).verify();
-  } catch {
-    throw AppError.badRequest("Could not connect to Brevo. Check the SMTP login and key.");
+  } catch (error) {
+    throw AppError.badRequest(smtpFailureMessage(error));
   }
   await saveBrevoSettings(credentials);
   await log(req, "notifications.brevo_configured", "EmailConfiguration", "brevo");
   ok(res, await emailStatus());
+}
+
+export async function testEmailConnection(_req, res) {
+  let configured;
+  try {
+    configured = await verifyEmailConnection();
+  } catch (error) {
+    throw new AppError(502, "SMTP_CONNECTION_FAILED", smtpFailureMessage(error));
+  }
+  if (!configured) throw new AppError(503, "EMAIL_NOT_CONFIGURED", "Email sending isn’t set up yet.");
+  ok(res, { verified: true });
 }
 
 export async function listCampaigns(req, res) {
