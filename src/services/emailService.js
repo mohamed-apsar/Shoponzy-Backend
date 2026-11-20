@@ -61,14 +61,14 @@ export function logEmail({ to, subject, type = "other", status, error, ref }) {
     .catch((err) => logger.warn({ err: err?.message }, "Could not write email log"));
 }
 
-export async function sendMail({ to, subject, text, html, headers, replyTo, type, ref }) {
+export async function sendMail({ to, subject, text, html, headers, replyTo, attachments, type, ref }) {
   const mail = await mailConfiguration();
   if (!mail) {
     if (type) await logEmail({ to, subject, type, status: "skipped", error: "Email (SMTP) is not configured", ref });
     return { sent: false, reason: "not_configured" };
   }
   try {
-    await mail.transport.sendMail({ from: mail.from, to, subject, text, html, headers, replyTo });
+    await mail.transport.sendMail({ from: mail.from, to, subject, text, html, headers, replyTo, attachments });
   } catch (err) {
     if (type) await logEmail({ to, subject, type, status: "failed", error: err?.responseCode === 525 ? smtpFailureMessage(err) : err?.message, ref });
     throw err;

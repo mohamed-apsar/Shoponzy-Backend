@@ -149,6 +149,12 @@ describe("checkout (COD)", () => {
     expect(await Payment.findOne({ provider: "cod" })).toMatchObject({ amount: 2000, status: "pending" });
     expect((await b.get("/cart").expect(200)).body.data.lines).toEqual([]);
     await vi.waitFor(() => expect(sent[0]).toMatchObject({ to: "asha@example.com", subject: "Order SZ100001 confirmed" }));
+    expect(sent[0].attachments).toMatchObject([{
+      filename: "Invoice-SZ100001.html",
+      content: expect.stringContaining("Invoice / Order SZ100001"),
+      contentType: "text/html; charset=utf-8",
+    }]);
+    expect(sent[0].attachments[0].content).not.toContain("onclick");
 
     // Later price edits don't change the order.
     await Product.updateOne({ _id: s._id }, { $set: { "variants.$[].price": 5000, name: "Renamed" } });
@@ -368,11 +374,17 @@ describe("order access, tracking and cancellation", () => {
 
     expect((await admin.patch(`/admin/orders/${id}/status`, { status: "delivered" }).expect(409)).body.error.code).toBe("INVALID_TRANSITION");
     await admin.patch(`/admin/orders/${id}/status`, { status: "confirmed" }).expect(200);
+    const confirmedMail = sent.find((message) => message.subject === `Order ${order.orderNumber}: confirmed`);
+    expect(confirmedMail?.attachments).toMatchObject([{
+      filename: `Invoice-${order.orderNumber}.html`,
+      content: expect.stringContaining(`Invoice / Order ${order.orderNumber}`),
+    }]);
     await admin.patch(`/admin/orders/${id}/status`, { status: "packed" }).expect(200);
     const shipped = await admin.patch(`/admin/orders/${id}/status`, { status: "shipped", fulfilment: { courier: "Delhivery", trackingNumber: "DLV123", trackingUrl: "https://track.example/DLV123" } }).expect(200);
     expect(shipped.body.data.order.fulfilment).toMatchObject({ courier: "Delhivery", trackingNumber: "DLV123" });
     expect(shipped.body.data.allowedTransitions).toEqual(["out_for_delivery", "delivered", "returned"]);
     expect(sent.some((m) => m.subject === `Order ${order.orderNumber}: shipped` && m.text.includes("https://track.example/DLV123"))).toBe(true);
+    expect(sent.find((m) => m.subject === `Order ${order.orderNumber}: shipped`).attachments).toBeUndefined();
     await admin.post(`/admin/orders/${id}/cancel`, {}).expect(409); // can't cancel once shipped
     await admin.patch(`/admin/orders/${id}/fulfilment`, { estimatedDeliveryDate: "2027-01-01" }).expect(200);
     await admin.patch(`/admin/orders/${id}/status`, { status: "out_for_delivery" }).expect(200);

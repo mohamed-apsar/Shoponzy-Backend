@@ -12,6 +12,7 @@ import { getCart, priceCart } from "./cartService.js";
 import { getRazorpay, paymentMethodDetails, toPaise } from "./razorpayService.js";
 import { orderConfirmationEmail, orderStatusEmail, trySendMail } from "./emailService.js";
 import { sendReturnEmail } from "./notifyService.js";
+import { renderInvoice } from "./invoiceService.js";
 
 const ORDER_EMAIL_SWITCH = {
   confirmation: "orderConfirmation", confirmed: "orderProgress", packed: "orderProgress",
@@ -23,8 +24,21 @@ function sendOrderEmail(order, kind, amount) {
   if (!order?.contact?.email) return;
   const message = kind === "confirmation" ? orderConfirmationEmail(order) : orderStatusEmail(order, kind, amount);
   if (!message) return;
-  return getSection("notifications").then((n) => {
+  return getSection("notifications").then(async (n) => {
     if (n[ORDER_EMAIL_SWITCH[kind]] === false) return;
+    if (kind === "confirmation" || kind === "confirmed") {
+      try {
+        message.attachments = [{
+          filename: `Invoice-${order.orderNumber}.html`,
+          content: await renderInvoice(order),
+          contentType: "text/html; charset=utf-8",
+        }];
+        message.text += "\n\nYour printable invoice is attached.";
+        message.html += "<p>Your printable invoice is attached.</p>";
+      } catch (error) {
+        logger.warn({ err: error.message, orderNumber: order.orderNumber }, "Unable to attach order invoice");
+      }
+    }
     return trySendMail({ to: order.contact.email, ...message, type: kind === "confirmation" ? "order_confirmation" : "order_status", ref: order.orderNumber });
   }).catch(() => {});
 }
